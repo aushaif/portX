@@ -23,7 +23,7 @@ FRPS_PORT: int = int(os.environ.get("PORTX_FRPS_PORT", "7000"))
 # ── Public DNS ────────────────────────────────────────────────────────────
 # HTTP tunnels use wildcard *.portx.infinitynoob.lol
 HTTP_TUNNEL_DOMAIN: str = os.environ.get(
-    "PORTX_HTTP_DOMAIN", "portx.infinitynoob.lol"
+    "PORTX_HTTP_DOMAIN", "infinitynoob.lol"
 )
 # TCP/UDP tunnels use dedicated subdomains (DNS-only in Cloudflare)
 TCP_TUNNEL_DOMAIN: str = os.environ.get(
@@ -35,7 +35,10 @@ UDP_TUNNEL_DOMAIN: str = os.environ.get(
 
 # ── Local FRP binary (installed by v1 installer) ──────────────────────────
 FRP_BINARY: Path = Path(
-    os.environ.get("PORTX_FRP_BINARY", str(Path.home() / "Downloads" / "portx" / "frp"))
+    os.environ.get(
+        "PORTX_FRP_BINARY",
+        str(Path(__file__).resolve().parent.parent / "bin" / "frpc")
+    )
 )
 
 # ── Timeouts ──────────────────────────────────────────────────────────────

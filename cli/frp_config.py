@@ -20,9 +20,11 @@ def _base(frps_host: str, frps_port: int) -> str:
     return (
         f'serverAddr = "{frps_host}"\n'
         f"serverPort = {frps_port}\n"
+        'auth.method = "token"\n'
+        'auth.token = "k3rnel-p4nic"\n'
         "\n"
         "[log]\n"
-        'level = "warn"\n'        # suppress verbose frpc logs in the terminal
+        'level = "warn"\n'
         "\n"
     )
 

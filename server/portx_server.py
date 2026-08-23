@@ -61,7 +61,7 @@ API_PORT = int(os.environ.get("PORTX_API_PORT", "8765"))
 FRPS_HOST = os.environ.get("PORTX_FRPS_HOST", "portx.infinitynoob.lol")
 FRPS_PORT = int(os.environ.get("PORTX_FRPS_PORT", "7000"))
 
-HTTP_DOMAIN = os.environ.get("PORTX_HTTP_DOMAIN", "portx.infinitynoob.lol")
+HTTP_DOMAIN = os.environ.get("PORTX_HTTP_DOMAIN", "infinitynoob.lol")
 TCP_DOMAIN  = os.environ.get("PORTX_TCP_DOMAIN",  "tcp.portx.infinitynoob.lol")
 UDP_DOMAIN  = os.environ.get("PORTX_UDP_DOMAIN",  "udp.portx.infinitynoob.lol")
 
