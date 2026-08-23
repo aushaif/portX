@@ -11,13 +11,13 @@ PortX installs the latest [FRP](https://github.com/fatedier/frp) client binary (
 ### macOS
 
 ```bash
-curl -fsSL https://your-portx-domain.com/install-macos.sh | bash
+curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-macos.sh | bash
 ```
 
 ### Linux
 
 ```bash
-curl -fsSL https://your-portx-domain.com/install-linux.sh | bash
+curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-linux.sh | bash
 ```
 
 Both commands require **Python 3.8+** to be installed.
