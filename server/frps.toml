@@ -1,0 +1,39 @@
+# frps.toml — PortX FRP Server Configuration
+# Deploy this on your VPS alongside portx_server.py
+#
+# PortX uses FRP v0.52+ TOML format.
+# Reference: https://github.com/fatedier/frp/blob/dev/conf/frps_full_example.toml
+
+# ── Server binding ────────────────────────────────────────────────────────
+# Port that frpc clients connect to
+bindPort = 7000
+
+# ── HTTP/HTTPS virtual hosting ────────────────────────────────────────────
+# HTTP tunnels are served on port 80 (reverse-proxied behind Cloudflare)
+vhostHTTPPort  = 80
+vhostHTTPSPort = 443
+
+# The base domain for HTTP subdomain tunnels.
+# Wildcard DNS *.portx.infinitynoob.lol must point to this VPS.
+subdomainHost = "portx.infinitynoob.lol"
+
+# ── Allowed remote ports for TCP and UDP tunnels ──────────────────────────
+# Must match the ranges configured in portx_server.py
+# TCP:  30000–31999
+# UDP:  32000–33999
+allowPorts = [
+  { start = 30000, end = 31999 },
+  { start = 32000, end = 33999 },
+]
+
+# ── Logging ───────────────────────────────────────────────────────────────
+[log]
+to    = "/var/log/frps/frps.log"
+level = "info"
+
+# ── Dashboard (optional — remove in production if not needed) ─────────────
+# [webServer]
+# addr     = "127.0.0.1"
+# port     = 7500
+# user     = "admin"
+# password = "changeme"
