@@ -27,7 +27,7 @@ if [ -z "$PYTHON" ]; then
 fi
 
 # ── Download and run the Python installer ────────────────────────────────
-INSTALLER_URL="https://raw.githubusercontent.com/your-org/portx/main/installer/portx_install.py"
+INSTALLER_URL="https://raw.githubusercontent.com/aushaif/portX/main/installer/portx_install.py"
 TMP_SCRIPT="$(mktemp /tmp/portx_install_XXXXXX.py)"
 
 cleanup() { rm -f "$TMP_SCRIPT"; }
