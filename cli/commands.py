@@ -6,6 +6,7 @@ Implements list, info, stop, remove, restart, and status.
 from __future__ import annotations
 
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -171,6 +172,49 @@ def cmd_remove_all() -> None:
         cmd_remove(name)
         
     print("\n  ✓ All tunnels removed permanently.\n")
+
+
+def cmd_uninstall() -> None:
+    """Complete system uninstall of PortX."""
+    print("\n  PortX Uninstaller")
+    print("  ─────────────────────────────────────────\n")
+    
+    # 1. Check if Homebrew
+    portx_bin = shutil.which("portx")
+    if portx_bin and ("homebrew" in portx_bin.lower() or "cellar" in portx_bin.lower() or "/opt/homebrew" in portx_bin):
+        print("  ✗ PortX was installed via Homebrew.")
+        print("    Please uninstall using: brew uninstall portx\n")
+        sys.exit(1)
+        
+    # 2. Stop and remove all tunnels
+    tunnels = _state.list_tunnels()
+    if tunnels:
+        print("  → Stopping active tunnels...")
+        for name in list(tunnels.keys()):
+            _stop_tunnel(name, tunnels[name])
+        print("  ✓ Tunnels stopped.")
+
+    # 3. Delete ~/.portx directory
+    portx_dir = Path.home() / ".portx"
+    if portx_dir.exists():
+        print(f"  → Removing {portx_dir}...")
+        try:
+            shutil.rmtree(portx_dir)
+            print("  ✓ Directory removed.")
+        except Exception as e:
+            print(f"  ✗ Failed to remove {portx_dir}: {e}")
+
+    # 4. Delete global symlink
+    local_bin = Path.home() / ".local" / "bin" / "portx"
+    if local_bin.exists() or local_bin.is_symlink():
+        print(f"  → Removing symlink {local_bin}...")
+        try:
+            local_bin.unlink()
+            print("  ✓ Symlink removed.")
+        except Exception as e:
+            print(f"  ✗ Failed to remove symlink: {e}")
+
+    print("\n  ✓ PortX has been successfully uninstalled.\n")
 
 
 def cmd_restart(name: str) -> None:

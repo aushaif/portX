@@ -9,6 +9,13 @@ FRP binaries are downloaded directly from the official GitHub Releases — PortX
 
 ## Installation
 
+### macOS (Homebrew - Recommended)
+
+```bash
+brew tap aushaif/portX
+brew install portx
+```
+
 ### macOS
 
 ```bash
@@ -21,7 +28,20 @@ curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-
 curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-linux.sh | bash
 ```
 
+*(Use `install-linux.sh` for Linux).*
+
 Both commands require **Python 3.8+** to be installed.
+
+---
+
+## Uninstallation
+
+To completely remove PortX and all associated background tunnels:
+
+```bash
+portx uninstall
+```
+*(If installed via Homebrew, the command will safely exit and ask you to run `brew uninstall portx`).*
 
 ---
 
@@ -103,15 +123,15 @@ PortX CLI → POST /api/v1/tunnel → PortX API server
                                Allocate subdomain "x7k29m"
                                Return tunnel info + frps details
           ↓
-PortX CLI generates temporary frpc TOML config
+PortX CLI generates temporary frpc TOML config in ~/.portx/tunnels
           ↓
-PortX CLI starts frpc (~/Downloads/portx/frp)
+PortX CLI starts frpc (~/.portx/bin/frpc)
           ↓
 frpc connects to frps on portx.infinitynoob.lol:7000
           ↓
 Tunnel is live: https://x7k29m.portx.infinitynoob.lol → 127.0.0.1:8080
           ↓
-Ctrl+C → frpc stops → temp TOML deleted → server notified
+portx stop → frpc stops → temp TOML deleted → server notified
 ```
 
 ---
@@ -136,11 +156,12 @@ portx/
 │   └── portx_install.py         # v1: FRP downloader/installer
 ├── cli/
 │   ├── portx.py                 # v2: CLI entry point
+│   ├── commands.py              # CLI commands (start, stop, etc.)
 │   ├── config.py                # Centralised server config
-│   ├── address.py               # Local address parser
 │   ├── api_client.py            # PortX API client
+│   ├── state.py                 # SQLite/JSON state management
 │   ├── frp_config.py            # FRP TOML generator
-│   └── frp_runner.py            # frpc process manager
+│   └── worker.py                # Background daemon process
 ├── server/
 │   ├── portx_server.py          # PortX API server (runs on VPS)
 │   ├── frps.toml                # frps config for VPS
@@ -188,7 +209,7 @@ All server addresses are configurable via environment variables — never hardco
 | `PORTX_HTTP_DOMAIN` | `portx.infinitynoob.lol`       | HTTP wildcard domain     |
 | `PORTX_TCP_DOMAIN`  | `tcp.portx.infinitynoob.lol`   | TCP tunnel hostname      |
 | `PORTX_UDP_DOMAIN`  | `udp.portx.infinitynoob.lol`   | UDP tunnel hostname      |
-| `PORTX_FRP_BINARY`  | `~/Downloads/portx/frp`        | Path to frpc binary      |
+| `PORTX_FRP_BINARY`  | `~/.portx/bin/frpc`        | Path to frpc binary      |
 
 ---
 
@@ -207,16 +228,18 @@ All server addresses are configurable via environment variables — never hardco
 
 ### v2 — implemented
 
-- `portx http <port>` — HTTP tunnels with random public subdomain
-- `portx tcp <port>`  — TCP tunnels with randomly assigned public port
-- `portx udp <port>`  — UDP tunnels with randomly assigned public port
-- Ctrl+C clean shutdown (stops frpc, notifies server, deletes temp TOML)
+- `portx list` — View all background tunnels
+- `portx stop <name>` — Stop a specific tunnel
+- `portx remove <name>` — Delete a stopped tunnel
+- `portx remove --all` — Wipe all tunnels completely
+- `portx restart <name>` — Restart a tunnel
+- `portx uninstall` — Complete system uninstall
+- Automatic daemonization (no terminal window required)
+- macOS Homebrew support
+- PATH integration (run `portx` from anywhere)
 
 ### Not yet implemented
 
-- `--subdomain`, `--domain`, `--name` options
 - User accounts / authentication
-- Homebrew tap / formula
 - Dashboard
 - Custom domains
-- PATH integration (run `portx` from anywhere)

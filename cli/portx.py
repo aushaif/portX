@@ -48,7 +48,6 @@ def _start_tunnel(
     local_addr_str: str,
     name: str | None,
     subdomain: str | None = None,
-    domain: str | None = None,
 ) -> None:
     _hdr()
     
@@ -73,7 +72,7 @@ def _start_tunnel(
     # 3. Request tunnel from server
     print(f"  → Requesting {tunnel_type.upper()} tunnel...")
     try:
-        info = _api.request_tunnel(tunnel_type, local_host, local_port, subdomain, domain)
+        info = _api.request_tunnel(tunnel_type, local_host, local_port, subdomain)
     except _api.APIError as exc:
         _err(str(exc))
 
@@ -86,16 +85,7 @@ def _start_tunnel(
     # 4. Generate TOML
     if tunnel_type == "http":
         assigned_sub = subdomain if subdomain else info.get("subdomain", "")
-        assigned_dom = domain if domain else info.get("custom_domain")
-        
-        if assigned_dom:
-            if not assigned_dom.endswith("infinitynoob.lol") and assigned_dom != "infinitynoob.lol":
-                base_domain = f"{assigned_dom}.{_cfg.HTTP_TUNNEL_DOMAIN}"
-            else:
-                base_domain = assigned_dom
-            public_url = f"https://{assigned_sub}.{base_domain}"
-        else:
-            public_url = f"https://{assigned_sub}.{_cfg.HTTP_TUNNEL_DOMAIN}"
+        public_url = f"https://{assigned_sub}.{_cfg.HTTP_TUNNEL_DOMAIN}"
             
         toml = _toml.generate_http_config(
             local_host=local_host,
@@ -104,7 +94,6 @@ def _start_tunnel(
             proxy_name=proxy_name,
             frps_host=frps_host,
             frps_port=frps_port,
-            custom_domain=assigned_dom,
         )
     elif tunnel_type == "tcp":
         toml = _toml.generate_tcp_config(
@@ -132,10 +121,8 @@ def _start_tunnel(
     log_path = _state.LOGS_DIR / f"{name}.log"
 
     subdomain_to_save = None
-    domain_to_save = None
     if tunnel_type == "http":
         subdomain_to_save = assigned_sub
-        domain_to_save = assigned_dom
 
     # 6. Save state
     _state.update_tunnel(
@@ -149,7 +136,6 @@ def _start_tunnel(
         log_path=str(log_path),
         tunnel_id=tunnel_id,
         subdomain=subdomain_to_save,
-        domain=domain_to_save,
     )
 
     # 7. Spawn background worker
@@ -188,7 +174,8 @@ def main() -> None:
         print("    stop     Stop a running tunnel")
         print("    remove   Permanently delete a tunnel")
         print("    restart  Restart a stopped tunnel")
-        print("    status   Show PortX system status\n")
+        print("    status   Show PortX system status")
+        print("    uninstall Complete system uninstall of PortX\n")
         print("  Run 'portx <command> --help' for more information on a command.")
         print(_HELP_EPILOG)
         sys.exit(0)
@@ -206,7 +193,6 @@ def main() -> None:
     p_http.add_argument("local_address", help="Port or host:port (e.g., 8080 or 127.0.0.1:8080)")
     p_http.add_argument("name", nargs="?", help="Optional custom tunnel name (e.g. 'website'). If omitted, one is generated.")
     p_http.add_argument("--subdomain", help="Request a specific subdomain (e.g., 'noob')")
-    p_http.add_argument("--domain", help="Request a specific base domain (e.g., 'aushaif')")
 
     # --- TCP ---
     p_tcp = subparsers.add_parser("tcp", help="Create a TCP tunnel", description="Creates a persistent background TCP tunnel exposing your local port.")
@@ -241,12 +227,15 @@ def main() -> None:
 
     # --- STATUS ---
     subparsers.add_parser("status", help="Show PortX status")
+    
+    # --- UNINSTALL ---
+    subparsers.add_parser("uninstall", help="Complete system uninstall of PortX")
 
     args = parser.parse_args()
 
     try:
         if args.command == "http":
-            _start_tunnel("http", args.local_address, args.name, args.subdomain, getattr(args, "domain", None))
+            _start_tunnel("http", args.local_address, args.name, args.subdomain)
         elif args.command == "tcp":
             _start_tunnel("tcp", args.local_address, args.name)
         elif args.command == "udp":
@@ -273,6 +262,8 @@ def main() -> None:
             _cmds.cmd_restart(args.name)
         elif args.command == "status":
             _cmds.cmd_status()
+        elif args.command == "uninstall":
+            _cmds.cmd_uninstall()
     except KeyboardInterrupt:
         print("\n")
         sys.exit(0)

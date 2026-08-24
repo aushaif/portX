@@ -33,13 +33,18 @@ UDP_TUNNEL_DOMAIN: str = os.environ.get(
     "PORTX_UDP_DOMAIN", "udp.portx.infinitynoob.lol"
 )
 
-# ── Local FRP binary (installed by v1 installer) ──────────────────────────
+# ── Local FRP binary (installed by v1 installer or custom install) ────────────
+# Defaults to ~/.portx/bin/frpc, fallback to src/bin/frpc
 FRP_BINARY: Path = Path(
     os.environ.get(
         "PORTX_FRP_BINARY",
-        str(Path(__file__).resolve().parent.parent / "bin" / "frpc")
+        str(Path.home() / ".portx" / "bin" / "frpc")
     )
 )
+if not FRP_BINARY.exists():
+    fallback = Path(__file__).resolve().parent.parent / "bin" / "frpc"
+    if fallback.exists():
+        FRP_BINARY = fallback
 
 # ── Timeouts ──────────────────────────────────────────────────────────────
 API_TIMEOUT: int = 15           # seconds for PortX API calls

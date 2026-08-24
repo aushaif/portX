@@ -35,3 +35,25 @@ trap cleanup EXIT
 
 curl -fsSL "$INSTALLER_URL" -o "$TMP_SCRIPT"
 "$PYTHON" "$TMP_SCRIPT"
+
+# ── Add ~/.local/bin to PATH if not already there ────────────────────────
+SHELL_RC=""
+if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "$SHELL")" = "zsh" ]; then
+  SHELL_RC="$HOME/.zshrc"
+elif [ -n "${BASH_VERSION:-}" ] || [ "$(basename "$SHELL")" = "bash" ]; then
+  SHELL_RC="$HOME/.bash_profile"
+fi
+
+LOCAL_BIN="$HOME/.local/bin"
+if [ -n "$SHELL_RC" ] && ! grep -q "$LOCAL_BIN" "$SHELL_RC" 2>/dev/null; then
+  echo "" >> "$SHELL_RC"
+  echo "# Added by PortX installer" >> "$SHELL_RC"
+  echo "export PATH=\"$LOCAL_BIN:\$PATH\"" >> "$SHELL_RC"
+  echo ""
+  echo "  ✓ Added ~/.local/bin to PATH in $SHELL_RC"
+  echo "  → Run 'source $SHELL_RC' or restart your terminal to apply."
+fi
+
+echo ""
+echo "  Run 'portx help' to get started."
+echo ""
