@@ -210,8 +210,7 @@ def install_portx_cli() -> None:
         for py_file in cli_dir.glob("*.py"):
             shutil.copy2(py_file, lib_dir / py_file.name)
         
-        # Create the executable wrapper
-        LOCAL_BIN_DIR.mkdir(parents=True, exist_ok=True)
+        # Create the executable wrapper (this will also create LOCAL_BIN_DIR)
         create_executable_wrapper(PORTX_EXECUTABLE, lib_dir)
         
     _success("PortX CLI installed to ~/.local/bin/portx")
@@ -219,6 +218,13 @@ def install_portx_cli() -> None:
 
 def create_executable_wrapper(output_path: Path, lib_dir: Path) -> None:
     """Create an executable wrapper script that imports from lib directory."""
+    
+    # Remove old installation if it exists (could be symlink or file)
+    if output_path.exists() or output_path.is_symlink():
+        output_path.unlink()
+    
+    # Ensure parent directory exists
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     
     wrapper = f'''#!/usr/bin/env python3
 """
