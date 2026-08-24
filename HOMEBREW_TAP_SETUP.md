@@ -1,8 +1,8 @@
-# Setting Up Homebrew Tap for PortX CLI
+# Setting Up Homebrew Tap for PortX
 
 ## Overview
 
-To avoid conflicts with the existing `portx` cask (unrelated PortX.app), we use a custom tap with the formula name `portx-cli`.
+To make installation simple with `brew install portx`, we use a custom tap. Users must add your tap first since there's an unrelated `portx` cask in Homebrew's default repository.
 
 ## Repository Structure
 
@@ -28,16 +28,16 @@ mkdir Formula
 Copy the formula from this repo:
 
 ```bash
-cp /path/to/portX/Formula/portx-cli.rb homebrew-portx/Formula/
+cp /path/to/portX/Formula/portx.rb homebrew-portx/Formula/
 ```
 
-Or create `Formula/portx-cli.rb` with the content from `Formula/portx-cli.rb` in this repo.
+Or create `Formula/portx.rb` with the content from `Formula/portx.rb` in this repo.
 
 ## Step 3: Commit and Push
 
 ```bash
-git add Formula/portx-cli.rb
-git commit -m "Add portx-cli formula"
+git add Formula/portx.rb
+git commit -m "Add portx formula"
 git push origin main
 ```
 
@@ -48,7 +48,7 @@ git push origin main
 brew tap aushaif/portx
 
 # Install the formula
-brew install portx-cli
+brew install portx
 
 # Test
 portx --help
@@ -66,11 +66,12 @@ Make sure the main PortX README contains:
 
 ```bash
 brew tap aushaif/portx
-brew install portx-cli
+brew install portx
 ```
 
-**Important**: The formula name is `portx-cli` to avoid conflicts with an unrelated PortX.app cask.
-**Do NOT use** `brew install portx` — that installs a different application.
+**Note:** You must use the tap `aushaif/portx` because there's an unrelated PortX.app 
+in Homebrew's default casks. Once you've added the tap, `brew install portx` will 
+install this CLI tool.
 ```
 
 ## Updating the Formula
@@ -102,10 +103,13 @@ brew upgrade portx-cli
 Homebrew tap formula naming:
 
 - Tap URL: `https://github.com/aushaif/homebrew-portx`
-- Formula file: `Formula/portx-cli.rb`
-- Class name: `PortxCli`
+- Formula file: `Formula/portx.rb`
+- Class name: `Portx`
 - Tap name: `aushaif/portx`
-- Install command: `brew install aushaif/portx/portx-cli` or just `brew install portx-cli` after tapping
+- Install command: `brew install aushaif/portx/portx` or just `brew install portx` after tapping
+
+**Why the tap is needed:**
+There's an unrelated PortX.app cask in Homebrew's main repository. By using your own tap, `brew install portx` will prioritize your formula once users have added your tap.
 
 ## Testing Locally
 
@@ -113,10 +117,10 @@ Before pushing to GitHub:
 
 ```bash
 # Install from local formula file
-brew install --build-from-source Formula/portx-cli.rb
+brew install --build-from-source Formula/portx.rb
 
 # Or test the tap locally
-brew install --build-from-source aushaif/portx/portx-cli
+brew install --build-from-source aushaif/portx/portx
 ```
 
 ## Troubleshooting
@@ -176,12 +180,12 @@ This is more reliable than using the `main` branch URL.
 
 **Tap Repository (to create):**
 - `https://github.com/aushaif/homebrew-portx`
-- Contains: `Formula/portx-cli.rb`
+- Contains: `Formula/portx.rb`
 
 **Installation:**
 ```bash
 brew tap aushaif/portx
-brew install portx-cli
+brew install portx
 ```
 
 **Executable:**

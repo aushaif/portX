@@ -78,9 +78,9 @@ git push origin main
    git clone https://github.com/aushaif/homebrew-portx.git
    cd homebrew-portx
    mkdir Formula
-   cp /path/to/portX/Formula/portx-cli.rb Formula/
-   git add Formula/portx-cli.rb
-   git commit -m "Add portx-cli formula v2.0.0"
+   cp /path/to/portX/Formula/portx.rb Formula/
+   git add Formula/portx.rb
+   git commit -m "Add portx formula v2.0.0"
    git push origin main
    ```
 
@@ -91,7 +91,7 @@ git push origin main
    
    # Test Homebrew (after tap setup)
    brew tap aushaif/portx
-   brew install portx-cli
+   brew install portx
    ```
 
 3. **Verify**:

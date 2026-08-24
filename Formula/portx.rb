@@ -1,4 +1,4 @@
-class PortxCli < Formula
+class Portx < Formula
   desc "Simple localhost tunneling tool - PortX CLI"
   homepage "https://github.com/aushaif/portX"
   url "https://github.com/aushaif/portX/archive/refs/heads/main.tar.gz"

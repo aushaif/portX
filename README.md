@@ -9,31 +9,33 @@ FRP binaries are downloaded directly from the official GitHub Releases — PortX
 
 ## Installation
 
-### macOS / Linux (Recommended)
+### Quick Install (macOS & Linux)
 
+**macOS:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-macos.sh | bash
 ```
 
-*(Works for both macOS and Linux)*
+**Linux:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-linux.sh | bash
+```
 
-This will install:
+Both scripts are identical and work on macOS and Linux. They install:
 - PortX CLI to `~/.local/bin/portx`
 - FRP client binary to `~/.portx/bin/frpc`
 - Runtime directories in `~/.portx/` (tunnels/, logs/, tunnels.toml)
 
-Both commands require **Python 3.8+** to be installed.
+**Requirements:** Python 3.8+
 
-### macOS (Homebrew)
-
-**Important**: The formula name is `portx-cli` to avoid conflicts with an unrelated PortX.app cask.
+### Homebrew (macOS only)
 
 ```bash
 brew tap aushaif/portx
-brew install portx-cli
+brew install portx
 ```
 
-**Do NOT use** `brew install portx` — that installs an unrelated application.
+**Note:** You must use the tap `aushaif/portx` because there's an unrelated PortX.app in Homebrew's default casks. Once you've added the tap, `brew install portx` will install this CLI tool.
 
 ---
 
@@ -52,7 +54,7 @@ This removes:
 **If installed via Homebrew:**
 
 ```bash
-brew uninstall portx-cli
+brew uninstall portx
 rm -rf ~/.portx  # Optional: remove runtime data
 ```
 
