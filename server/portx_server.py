@@ -105,11 +105,23 @@ class TunnelAllocator:
 
     # ── HTTP ─────────────────────────────────────────────────────────────
 
-    def allocate_http(self, local_host: str, local_port: int) -> dict:
+    def allocate_http(self, local_host: str, local_port: int, req_sub: str | None = None, req_dom: str | None = None) -> dict:
         with self._lock:
-            subdomain  = self._new_subdomain()
+            if req_sub:
+                subdomain = req_sub
+                if subdomain in self._used_subdomains:
+                    raise RuntimeError(f"Subdomain '{subdomain}' is already in use.")
+            else:
+                subdomain = self._new_subdomain()
+
             proxy_name = f"portx-http-{subdomain}"
             tunnel_id  = str(uuid.uuid4())
+            
+            base_domain = req_dom if req_dom else HTTP_DOMAIN
+            if not base_domain.endswith("infinitynoob.lol") and base_domain != "infinitynoob.lol":
+                 base_domain = f"{base_domain}.{HTTP_DOMAIN}"
+            
+            public_url = f"https://{subdomain}.{base_domain}"
 
             self._used_subdomains.add(subdomain)
             self._tunnels[tunnel_id] = {
@@ -124,10 +136,11 @@ class TunnelAllocator:
                 "tunnel_id":  tunnel_id,
                 "type":       "http",
                 "subdomain":  subdomain,
-                "public_url": f"https://{subdomain}.{HTTP_DOMAIN}",
+                "public_url": public_url,
                 "proxy_name": proxy_name,
                 "frps_host":  FRPS_HOST,
                 "frps_port":  FRPS_PORT,
+                "custom_domain": req_dom
             }
 
     # ── TCP ──────────────────────────────────────────────────────────────
@@ -286,6 +299,8 @@ class PortXHandler(BaseHTTPRequestHandler):
         tunnel_type = body.get("type", "").lower()
         local_host  = body.get("local_host", "127.0.0.1")
         local_port  = body.get("local_port")
+        req_sub     = body.get("subdomain")
+        req_dom     = body.get("domain")
 
         # Validate
         if tunnel_type not in ("http", "tcp", "udp"):
@@ -299,7 +314,7 @@ class PortXHandler(BaseHTTPRequestHandler):
         # Allocate
         try:
             if tunnel_type == "http":
-                info = _allocator.allocate_http(local_host, local_port)
+                info = _allocator.allocate_http(local_host, local_port, req_sub, req_dom)
             elif tunnel_type == "tcp":
                 info = _allocator.allocate_tcp(local_host, local_port)
             else:

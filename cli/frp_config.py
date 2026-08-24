@@ -41,30 +41,32 @@ def generate_http_config(
     proxy_name: str,
     frps_host: str,
     frps_port: int,
+    custom_domain: str | None = None,
 ) -> str:
     """
     Generate frpc TOML for an HTTP tunnel.
-
-    Example output:
-      serverAddr = "portx.infinitynoob.lol"
-      serverPort = 7000
-
-      [[proxies]]
-      name       = "portx-http-x7k29m"
-      type       = "http"
-      localIP    = "127.0.0.1"
-      localPort  = 8080
-      subdomain  = "x7k29m"
     """
-    return (
+    base_toml = (
         _base(frps_host, frps_port)
         + "[[proxies]]\n"
         + f'name      = "{proxy_name}"\n'
         + 'type      = "http"\n'
         + f'localIP   = "{local_host}"\n'
         + f"localPort = {local_port}\n"
-        + f'subdomain = "{subdomain}"\n'
     )
+    
+    if custom_domain:
+        if not custom_domain.endswith("infinitynoob.lol") and custom_domain != "infinitynoob.lol":
+            import config
+            base_domain = f"{custom_domain}.{config.HTTP_TUNNEL_DOMAIN}"
+        else:
+            base_domain = custom_domain
+        full_domain = f"{subdomain}.{base_domain}"
+        base_toml += f'customDomains = ["{full_domain}"]\n'
+    else:
+        base_toml += f'subdomain = "{subdomain}"\n'
+        
+    return base_toml
 
 
 def generate_tcp_config(

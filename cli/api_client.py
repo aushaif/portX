@@ -85,17 +85,23 @@ def _request(method: str, path: str, body: dict | None = None) -> dict | None:
 # Public functions
 # ---------------------------------------------------------------------------
 
-def request_tunnel(tunnel_type: str, local_host: str, local_port: int) -> dict:
+def request_tunnel(tunnel_type: str, local_host: str, local_port: int, subdomain: str | None = None, domain: str | None = None) -> dict:
     """
     Ask the PortX server to allocate a tunnel.
     Returns the server's response dict (see module docstring for shape).
     Raises APIError on failure.
     """
-    result = _request("POST", "/api/v1/tunnel", {
+    body = {
         "type":       tunnel_type,
         "local_host": local_host,
         "local_port": local_port,
-    })
+    }
+    if subdomain:
+        body["subdomain"] = subdomain
+    if domain:
+        body["domain"] = domain
+
+    result = _request("POST", "/api/v1/tunnel", body)
     if not result:
         raise APIError("Server returned an empty response to tunnel request.")
     return result
