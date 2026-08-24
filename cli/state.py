@@ -20,6 +20,10 @@ LOGS_DIR = PORTX_DIR / "logs"
 for d in (PORTX_DIR, CONFIGS_DIR, LOGS_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
+# Ensure tunnels.toml exists
+if not TUNNELS_TOML.exists():
+    TUNNELS_TOML.write_text("", "utf-8")
+
 
 # ── Lightweight TOML Parser ───────────────────────────────────────────────
 

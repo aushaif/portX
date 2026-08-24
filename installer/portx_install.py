@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
 PortX Installer
-Downloads the PortX CLI source and the FRP client binary, installing everything
-to ~/.portx and linking the executable to ~/.local/bin/portx.
+Downloads the PortX CLI and the FRP client binary, installing to:
+- ~/.local/bin/portx (CLI executable)
+- ~/.portx/bin/frpc (FRP client binary)
+- ~/.portx/ (runtime data: tunnels.toml, tunnels/, logs/)
 
 Zero external Python dependencies (stdlib only).
 """
@@ -31,11 +33,10 @@ FRP_GITHUB_API = "https://api.github.com/repos/fatedier/frp/releases/latest"
 PORTX_GITHUB_TAR = "https://github.com/aushaif/portX/archive/refs/heads/main.tar.gz"
 
 PORTX_DIR      = Path.home() / ".portx"
-SRC_DIR        = PORTX_DIR / "src"
 BIN_DIR        = PORTX_DIR / "bin"
 FRP_PATH       = BIN_DIR / "frpc"
 LOCAL_BIN_DIR  = Path.home() / ".local" / "bin"
-SYMLINK_PATH   = LOCAL_BIN_DIR / "portx"
+PORTX_EXECUTABLE = LOCAL_BIN_DIR / "portx"
 
 NETWORK_TIMEOUT = 30
 
@@ -170,14 +171,11 @@ def download_file(url: str, dest_path: Path, silent: bool = False) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Install PortX Source
+# Install PortX CLI
 # ---------------------------------------------------------------------------
 
-def install_portx_source() -> None:
+def install_portx_cli() -> None:
     _step("Downloading PortX CLI...")
-    if SRC_DIR.exists():
-        shutil.rmtree(SRC_DIR, ignore_errors=True)
-    SRC_DIR.parent.mkdir(parents=True, exist_ok=True)
     
     with tempfile.TemporaryDirectory(prefix="portx_src_") as tmp_dir:
         tar_path = Path(tmp_dir) / "portx.tar.gz"
@@ -197,10 +195,53 @@ def install_portx_source() -> None:
                 
         if not extracted_dir:
             _error("Failed to find PortX source directory inside tarball.")
-            
-        shutil.move(str(extracted_dir), str(SRC_DIR))
         
-    _success("PortX CLI installed.")
+        cli_dir = extracted_dir / "cli"
+        if not cli_dir.exists():
+            _error("CLI directory not found in repository.")
+        
+        # Install CLI modules to ~/.local/lib/portx/
+        lib_dir = LOCAL_BIN_DIR.parent / "lib" / "portx"
+        if lib_dir.exists():
+            shutil.rmtree(lib_dir)
+        lib_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Copy all CLI modules
+        for py_file in cli_dir.glob("*.py"):
+            shutil.copy2(py_file, lib_dir / py_file.name)
+        
+        # Create the executable wrapper
+        LOCAL_BIN_DIR.mkdir(parents=True, exist_ok=True)
+        create_executable_wrapper(PORTX_EXECUTABLE, lib_dir)
+        
+    _success("PortX CLI installed to ~/.local/bin/portx")
+
+
+def create_executable_wrapper(output_path: Path, lib_dir: Path) -> None:
+    """Create an executable wrapper script that imports from lib directory."""
+    
+    wrapper = f'''#!/usr/bin/env python3
+"""
+PortX CLI - Installed to ~/.local/bin/portx
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# Add library directory to path
+LIB_DIR = Path("{lib_dir}")
+if str(LIB_DIR) not in sys.path:
+    sys.path.insert(0, str(LIB_DIR))
+
+# Import and run the main CLI
+if __name__ == "__main__":
+    import portx as _portx_main
+    _portx_main.main()
+'''
+    
+    output_path.write_text(wrapper, "utf-8")
+    output_path.chmod(output_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
 # ---------------------------------------------------------------------------
@@ -272,21 +313,13 @@ def extract_and_install_frpc(archive_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Create global symlink
+# Ensure runtime directories exist
 # ---------------------------------------------------------------------------
 
-def create_symlink() -> None:
-    LOCAL_BIN_DIR.mkdir(parents=True, exist_ok=True)
-    target = SRC_DIR / "portx"
-    
-    if SYMLINK_PATH.exists() or SYMLINK_PATH.is_symlink():
-        SYMLINK_PATH.unlink()
-        
-    try:
-        os.symlink(target, SYMLINK_PATH)
-        _success(f"Linked {SYMLINK_PATH.name} to ~/.local/bin")
-    except Exception as exc:
-        _error(f"Failed to create symlink: {exc}")
+def create_runtime_dirs() -> None:
+    """Create runtime directories in ~/.portx for tunnels, logs, etc."""
+    (PORTX_DIR / "tunnels").mkdir(parents=True, exist_ok=True)
+    (PORTX_DIR / "logs").mkdir(parents=True, exist_ok=True)
 
 
 def check_path() -> None:
@@ -313,7 +346,7 @@ def main() -> None:
     print()
     
     # 1. Install CLI
-    install_portx_source()
+    install_portx_cli()
     print()
 
     # 2. Fetch latest FRP
@@ -338,15 +371,17 @@ def main() -> None:
     
     print()
 
-    # 3. Create symlink
-    _step("Setting up global command...")
-    create_symlink()
+    # 3. Create runtime directories
+    _step("Setting up runtime directories...")
+    create_runtime_dirs()
+    _success("Runtime directories created.")
     
     print()
     print("  ─────────────────────────────────────────")
     _success("PortX installed successfully!")
-    print(f"  Code: {SRC_DIR}")
-    print(f"  FRP:  {FRP_PATH}")
+    print(f"  Executable: {PORTX_EXECUTABLE}")
+    print(f"  Runtime:    {PORTX_DIR}")
+    print(f"  FRP:        {FRP_PATH}")
     check_path()
 
 

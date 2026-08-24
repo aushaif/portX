@@ -166,15 +166,16 @@ def main() -> None:
         print("\n  Usage:")
         print("    portx <command> [options]\n")
         print("  Commands:")
-        print("    http     Create an HTTP tunnel")
-        print("    tcp      Create a TCP tunnel")
-        print("    udp      Create a UDP tunnel")
-        print("    list     List all active tunnels")
-        print("    info     Show detailed info for a tunnel")
-        print("    stop     Stop a running tunnel")
-        print("    remove   Permanently delete a tunnel")
-        print("    restart  Restart a stopped tunnel")
-        print("    status   Show PortX system status")
+        print("    http      Create an HTTP tunnel")
+        print("    tcp       Create a TCP tunnel")
+        print("    udp       Create a UDP tunnel")
+        print("    list      List all active tunnels")
+        print("    info      Show detailed info for a tunnel")
+        print("    stop      Stop a running tunnel")
+        print("    remove    Permanently delete a tunnel")
+        print("    restart   Restart a stopped tunnel")
+        print("    status    Show PortX system status")
+        print("    cleanup   Clean up orphaned tunnel files")
         print("    uninstall Complete system uninstall of PortX\n")
         print("  Run 'portx <command> --help' for more information on a command.")
         print(_HELP_EPILOG)
@@ -228,6 +229,10 @@ def main() -> None:
     # --- STATUS ---
     subparsers.add_parser("status", help="Show PortX status")
     
+    # --- CLEANUP ---
+    p_cleanup = subparsers.add_parser("cleanup", help="Clean up orphaned tunnel files")
+    p_cleanup.add_argument("--force", action="store_true", help="Force cleanup of all stopped tunnels")
+    
     # --- UNINSTALL ---
     subparsers.add_parser("uninstall", help="Complete system uninstall of PortX")
 
@@ -262,6 +267,8 @@ def main() -> None:
             _cmds.cmd_restart(args.name)
         elif args.command == "status":
             _cmds.cmd_status()
+        elif args.command == "cleanup":
+            _cmds.cmd_cleanup(args.force)
         elif args.command == "uninstall":
             _cmds.cmd_uninstall()
     except KeyboardInterrupt:

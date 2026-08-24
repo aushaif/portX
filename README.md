@@ -9,28 +9,31 @@ FRP binaries are downloaded directly from the official GitHub Releases — PortX
 
 ## Installation
 
-### macOS (Homebrew - Recommended)
-
-```bash
-brew tap aushaif/portX
-brew install portx
-```
-
-### macOS
+### macOS / Linux (Recommended)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-macos.sh | bash
 ```
 
-### Linux
+*(Works for both macOS and Linux)*
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-linux.sh | bash
-```
-
-*(Use `install-linux.sh` for Linux).*
+This will install:
+- PortX CLI to `~/.local/bin/portx`
+- FRP client binary to `~/.portx/bin/frpc`
+- Runtime directories in `~/.portx/` (tunnels/, logs/, tunnels.toml)
 
 Both commands require **Python 3.8+** to be installed.
+
+### macOS (Homebrew)
+
+**Important**: The formula name is `portx-cli` to avoid conflicts with an unrelated PortX.app cask.
+
+```bash
+brew tap aushaif/portx
+brew install portx-cli
+```
+
+**Do NOT use** `brew install portx` — that installs an unrelated application.
 
 ---
 
@@ -41,7 +44,19 @@ To completely remove PortX and all associated background tunnels:
 ```bash
 portx uninstall
 ```
-*(If installed via Homebrew, the command will safely exit and ask you to run `brew uninstall portx`).*
+
+This removes:
+- `~/.local/bin/portx` (CLI executable)
+- `~/.portx/` (runtime data, tunnels, logs)
+
+**If installed via Homebrew:**
+
+```bash
+brew uninstall portx-cli
+rm -rf ~/.portx  # Optional: remove runtime data
+```
+
+The Homebrew uninstall preserves `~/.portx` runtime data by default in case you want to reinstall later.
 
 ---
 
@@ -105,11 +120,25 @@ Public: udp.portx.infinitynoob.lol:32001
 ### Help
 
 ```bash
-./portx --help
-./portx http --help
-./portx tcp  --help
-./portx udp  --help
+portx --help
+portx http --help
+portx tcp  --help
+portx udp  --help
 ```
+
+### Cleanup
+
+If you have orphaned tunnel files or old tunnel records:
+
+```bash
+portx cleanup              # Clean up orphaned config and log files
+portx cleanup --force      # Also remove all stopped tunnel records
+```
+
+This is useful if:
+- You deleted `~/.portx/` manually but tunnels are still showing
+- Old tunnels from before a reinstall are still listed
+- You see tunnel files but no corresponding records
 
 ---
 
@@ -151,26 +180,35 @@ portx stop → frpc stops → temp TOML deleted → server notified
 
 ```
 portx/
-├── portx                        ← Run tunnels: ./portx http 8080
+├── portx                        ← Development entry point: ./portx http 8080
 ├── installer/
-│   └── portx_install.py         # v1: FRP downloader/installer
+│   └── portx_install.py         # Installer: downloads CLI + FRP, installs to ~/.local/bin
 ├── cli/
-│   ├── portx.py                 # v2: CLI entry point
-│   ├── commands.py              # CLI commands (start, stop, etc.)
-│   ├── config.py                # Centralised server config
+│   ├── portx.py                 # CLI entry point
+│   ├── commands.py              # CLI commands (start, stop, list, etc.)
+│   ├── config.py                # Centralized server config
 │   ├── api_client.py            # PortX API client
-│   ├── state.py                 # SQLite/JSON state management
+│   ├── state.py                 # State management (tunnels.toml)
 │   ├── frp_config.py            # FRP TOML generator
-│   └── worker.py                # Background daemon process
+│   ├── frp_runner.py            # FRP process manager
+│   ├── worker.py                # Background daemon process
+│   └── address.py               # Address parsing utilities
 ├── server/
 │   ├── portx_server.py          # PortX API server (runs on VPS)
 │   ├── frps.toml                # frps config for VPS
 │   └── setup.sh                 # One-command VPS setup
-├── scripts/
-│   ├── install-macos.sh         # curl-pipe installer for macOS
-│   └── install-linux.sh         # curl-pipe installer for Linux
-└── README.md
+├── Formula/
+│   └── portx-cli.rb             # Homebrew formula
+└── scripts/
+    └── install-macos.sh         # curl-pipe installer script
 ```
+
+**Installation Layout:**
+- `~/.local/bin/portx` — CLI executable (works globally)
+- `~/.portx/bin/frpc` — FRP client binary
+- `~/.portx/tunnels.toml` — Persistent tunnel state
+- `~/.portx/tunnels/` — Per-tunnel FRP configs
+- `~/.portx/logs/` — Tunnel logs
 
 ---
 
@@ -233,6 +271,7 @@ All server addresses are configurable via environment variables — never hardco
 - `portx remove <name>` — Delete a stopped tunnel
 - `portx remove --all` — Wipe all tunnels completely
 - `portx restart <name>` — Restart a tunnel
+- `portx cleanup` — Clean up orphaned files
 - `portx uninstall` — Complete system uninstall
 - Automatic daemonization (no terminal window required)
 - macOS Homebrew support
@@ -243,3 +282,51 @@ All server addresses are configurable via environment variables — never hardco
 - User accounts / authentication
 - Dashboard
 - Custom domains
+
+---
+
+## Troubleshooting
+
+### Old/orphaned tunnels showing up
+
+If you see an old tunnel (like `https://boka.infinitynoob.lol/`) running that's not in your `portx list`, this means:
+
+1. The tunnel was created before but the local state was lost (e.g., you deleted `~/.portx/` manually)
+2. The server still has it allocated
+
+**Solution:**
+
+The tunnel will remain active on the server until the FRP client disconnects or the server is restarted. Since you lost the local state, you have two options:
+
+1. **Wait it out**: The server will eventually clean up inactive tunnels (when FRP connection drops)
+2. **Contact server admin**: Ask them to restart the FRP server (`frps`) which will clear all allocations
+3. **Use cleanup command**: Run `portx cleanup --force` to clean up any local state mismatches
+
+**Prevention:**
+
+Always use `portx stop <name>` or `portx remove <name>` to properly shut down tunnels. This notifies the server to release the allocation.
+
+### Missing FRP binary
+
+If you see "FRP binary not found" errors:
+
+```bash
+# Check if frpc exists
+ls -la ~/.portx/bin/frpc
+
+# Reinstall if missing
+curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-macos.sh | bash
+```
+
+### PATH issues
+
+If `portx` command is not found:
+
+```bash
+# Check if installed
+ls -la ~/.local/bin/portx
+
+# Add to PATH
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```

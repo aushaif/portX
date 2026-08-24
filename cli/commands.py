@@ -82,6 +82,7 @@ def cmd_list() -> None:
     print("\n  PORTX TUNNELS\n")
     if not tunnels:
         print("  No tunnels found.")
+        print("  Tip: Run 'portx http 8080' to create a tunnel.")
         print()
         return
 
@@ -179,11 +180,15 @@ def cmd_uninstall() -> None:
     print("\n  PortX Uninstaller")
     print("  ─────────────────────────────────────────\n")
     
-    # 1. Check if Homebrew
+    # 1. Check if Homebrew-managed
     portx_bin = shutil.which("portx")
-    if portx_bin and ("homebrew" in portx_bin.lower() or "cellar" in portx_bin.lower() or "/opt/homebrew" in portx_bin):
+    is_homebrew = portx_bin and ("homebrew" in portx_bin.lower() or "cellar" in portx_bin.lower() or "/opt/homebrew" in portx_bin)
+    
+    if is_homebrew:
         print("  ✗ PortX was installed via Homebrew.")
-        print("    Please uninstall using: brew uninstall portx\n")
+        print("    Please uninstall using: brew uninstall portx")
+        print("    Note: This will preserve ~/.portx runtime data.")
+        print("    To remove runtime data manually: rm -rf ~/.portx\n")
         sys.exit(1)
         
     # 2. Stop and remove all tunnels
@@ -194,27 +199,30 @@ def cmd_uninstall() -> None:
             _stop_tunnel(name, tunnels[name])
         print("  ✓ Tunnels stopped.")
 
-    # 3. Delete ~/.portx directory
+    # 3. Delete ~/.portx directory (runtime data)
     portx_dir = Path.home() / ".portx"
     if portx_dir.exists():
         print(f"  → Removing {portx_dir}...")
         try:
             shutil.rmtree(portx_dir)
-            print("  ✓ Directory removed.")
+            print("  ✓ Runtime directory removed.")
         except Exception as e:
             print(f"  ✗ Failed to remove {portx_dir}: {e}")
 
-    # 4. Delete global symlink
-    local_bin = Path.home() / ".local" / "bin" / "portx"
-    if local_bin.exists() or local_bin.is_symlink():
-        print(f"  → Removing symlink {local_bin}...")
+    # 4. Delete CLI executable at ~/.local/bin/portx
+    local_bin_portx = Path.home() / ".local" / "bin" / "portx"
+    if local_bin_portx.exists() or local_bin_portx.is_symlink():
+        print(f"  → Removing {local_bin_portx}...")
         try:
-            local_bin.unlink()
-            print("  ✓ Symlink removed.")
+            local_bin_portx.unlink()
+            print("  ✓ CLI executable removed.")
         except Exception as e:
-            print(f"  ✗ Failed to remove symlink: {e}")
+            print(f"  ✗ Failed to remove executable: {e}")
 
     print("\n  ✓ PortX has been successfully uninstalled.\n")
+    print("  Installation artifacts removed:")
+    print("    - ~/.local/bin/portx (CLI executable)")
+    print("    - ~/.portx/ (runtime data)\n")
 
 
 def cmd_restart(name: str) -> None:
@@ -258,3 +266,59 @@ def cmd_status() -> None:
     print(f"  Tunnels:   {running} running")
     print(f"  Stopped:   {stopped}")
     print()
+
+
+def cmd_cleanup(force: bool = False) -> None:
+    """Clean up orphaned tunnel configuration files and logs."""
+    print("\n  PortX Cleanup\n")
+    
+    tunnels = _state.list_tunnels()
+    
+    # Find orphaned config and log files
+    config_dir = _state.CONFIGS_DIR
+    log_dir = _state.LOGS_DIR
+    
+    cleaned_configs = 0
+    cleaned_logs = 0
+    
+    # Get list of known tunnel names
+    known_tunnels = set(tunnels.keys())
+    
+    # Clean up orphaned config files
+    if config_dir.exists():
+        for config_file in config_dir.glob("*.toml"):
+            tunnel_name = config_file.stem
+            if tunnel_name not in known_tunnels or (force and tunnels.get(tunnel_name, {}).get("status") == "stopped"):
+                config_file.unlink()
+                cleaned_configs += 1
+                print(f"  → Removed orphaned config: {config_file.name}")
+    
+    # Clean up orphaned log files
+    if log_dir.exists():
+        for log_file in log_dir.glob("*.log"):
+            tunnel_name = log_file.stem
+            if tunnel_name not in known_tunnels or (force and tunnels.get(tunnel_name, {}).get("status") == "stopped"):
+                log_file.unlink()
+                cleaned_logs += 1
+                print(f"  → Removed orphaned log: {log_file.name}")
+    
+    # If force mode, also remove stopped tunnel records
+    if force:
+        removed = []
+        for name, t in list(tunnels.items()):
+            if t.get("status") in ("stopped", "failed"):
+                _state.remove_tunnel(name)
+                removed.append(name)
+        
+        if removed:
+            print(f"\n  → Removed {len(removed)} stopped tunnel record(s)")
+    
+    if cleaned_configs == 0 and cleaned_logs == 0 and (not force or not removed):
+        print("  ✓ No cleanup needed - everything is in sync.\n")
+    else:
+        print(f"\n  ✓ Cleanup complete:")
+        print(f"    Configs removed: {cleaned_configs}")
+        print(f"    Logs removed:    {cleaned_logs}")
+        if force and removed:
+            print(f"    Records removed: {len(removed)}")
+        print()
