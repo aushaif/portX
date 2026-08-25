@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# PortX installer — macOS
-# Usage: curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-macos.sh | bash
+# PortX installer — Linux
+# Usage: curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-linux.sh | bash
+
+{
 set -euo pipefail
 
 echo ""
@@ -48,13 +50,20 @@ if [ -z "$PYTHON" ]; then
     # Source brew for Apple Silicon
     if [ -f /opt/homebrew/bin/brew ]; then
       eval "$(/opt/homebrew/bin/brew shellenv)"
+      export PATH="/opt/homebrew/bin:$PATH"
     elif [ -f /usr/local/bin/brew ]; then
       eval "$(/usr/local/bin/brew shellenv)"
+      export PATH="/usr/local/bin:$PATH"
     fi
   fi
 
   echo "  → Installing/upgrading Python via Homebrew..."
   brew install python3 || brew upgrade python3
+
+  # Re-evaluate shellenv just in case
+  if command -v brew &>/dev/null; then
+    eval "$(brew shellenv)"
+  fi
 
   # Re-locate Python after install
   for cmd in python3.13 python3.12 python3; do
@@ -109,5 +118,10 @@ if ! grep -q "$LOCAL_BIN" "$SHELL_RC" 2>/dev/null; then
 fi
 
 echo ""
-echo "  Run 'portx --help' to get started."
+echo "  ─────────────────────────────────────────"
+echo "  ✓ Installation complete!"
+echo "  → To finish setup, configure your API token:"
+echo "      portx api <your-token>"
 echo ""
+
+}

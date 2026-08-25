@@ -235,7 +235,7 @@ def main() -> None:
     p_cleanup.add_argument("--force", action="store_true", help="Force cleanup of all stopped tunnels")
     
     # --- UNINSTALL ---
-    subparsers.add_parser("uninstall", help="Complete system uninstall of PortX")
+    p_uninstall = subparsers.add_parser("uninstall", aliases=["unistall"], help="Complete system uninstall of PortX")
 
     # --- API ---
     p_api = subparsers.add_parser(
@@ -288,7 +288,7 @@ def main() -> None:
             _cmds.cmd_status()
         elif args.command == "cleanup":
             _cmds.cmd_cleanup(args.force)
-        elif args.command == "uninstall":
+        elif args.command in ("uninstall", "unistall"):
             _cmds.cmd_uninstall()
         elif args.command == "api":
             sub = getattr(args, "subcommand", None)
