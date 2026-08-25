@@ -9,22 +9,22 @@ FRP binaries are downloaded directly from the official GitHub Releases — PortX
 
 ## Installation
 
-### Quick Install (macOS & Linux)
+### macOS
 
-**macOS:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-macos.sh | bash
 ```
 
-**Linux:**
+### Linux
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-linux.sh | bash
 ```
 
-Both scripts are identical and work on macOS and Linux. They install:
-- PortX CLI to `~/.local/bin/portx`
-- FRP client binary to `~/.portx/bin/frpc`
-- Runtime directories in `~/.portx/` (tunnels/, logs/, tunnels.toml)
+Both scripts install:
+- PortX CLI → `~/.local/bin/portx`
+- FRP client binary → `~/.portx/bin/frpc`
+- Runtime directories → `~/.portx/` (tunnels/, logs/, tunnels.toml)
 
 **Requirements:** Python 3.8+
 
@@ -35,146 +35,111 @@ brew tap aushaif/portx
 brew install portx
 ```
 
-**Note:** You must use the tap `aushaif/portx` because there's an unrelated PortX.app in Homebrew's default casks. Once you've added the tap, `brew install portx` will install this CLI tool.
+> **Note:** Use the tap `aushaif/portx` — there is an unrelated PortX.app in Homebrew's default casks.
 
 ---
 
-## Uninstallation
+## First Run — Auth Token
 
-To completely remove PortX and all associated background tunnels:
+On first use, PortX will prompt you to enter your auth token:
 
-```bash
-portx uninstall
+```
+  PortX — First Time Setup
+  ─────────────────────────────────────────
+
+  No auth token found. Please enter your PortX auth token.
+  You can find your token at: https://portx.infinitynoob.lol/dashboard
+
+  Auth token: ••••••••••••••••••••••
+
+  ✓ Auth token saved to ~/.portx/config.toml
 ```
 
-This removes:
-- `~/.local/bin/portx` (CLI executable)
-- `~/.portx/` (runtime data, tunnels, logs)
+Your token is saved to `~/.portx/config.toml` and reused automatically on all future commands.
 
-**If installed via Homebrew:**
+You can also set or update your token at any time:
 
 ```bash
-brew uninstall portx
-rm -rf ~/.portx  # Optional: remove runtime data
+portx api <your-token>
 ```
-
-The Homebrew uninstall preserves `~/.portx` runtime data by default in case you want to reinstall later.
 
 ---
 
-## Usage (v2 — Tunnels)
+## Commands
 
-Run from the project root after installing:
-
-### HTTP tunnel
+### Create tunnels
 
 ```bash
-./portx http 8080
-./portx http localhost:3000
-./portx http 127.0.0.1:8080
+portx http 8080                      # HTTP tunnel to local port 8080
+portx http 8080 my-app               # Named HTTP tunnel
+portx http 8080 --subdomain test     # HTTP tunnel on test.infinitynoob.lol
+portx tcp 25565                      # TCP tunnel
+portx udp 7777                       # UDP tunnel
 ```
 
-Output:
-
-```
-→ Requesting HTTP tunnel from PortX server...
-✓ Subdomain assigned: x7k29m
-
-→ Connecting to PortX server...
-✓ Connected
-
-✓ Tunnel active
-
-  Local:  127.0.0.1:8080
-  Public: https://x7k29m.portx.infinitynoob.lol
-
-  Forwarding traffic...
-  Press Ctrl+C to stop.
-```
-
-### TCP tunnel
+### Manage tunnels
 
 ```bash
-./portx tcp 25565
-./portx tcp 127.0.0.1:25565
+portx list                           # List all tunnels
+portx info <name>                    # Show detailed tunnel info
+portx stop <name>                    # Stop a tunnel
+portx stop --all                     # Stop all tunnels
+portx remove <name>                  # Remove a tunnel permanently
+portx remove --all                   # Remove all tunnels
+portx restart <name>                 # Restart a stopped tunnel
+portx status                         # Show system status and API URL
 ```
 
-Output:
-
-```
-Local:  127.0.0.1:25565
-Public: tcp.portx.infinitynoob.lol:30125
-```
-
-### UDP tunnel
+### Auth token & config
 
 ```bash
-./portx udp 7777
+portx api <token>                    # Set or update your auth token
+portx api ls                         # Show current API URL and token
 ```
 
-Output:
-
-```
-Local:  127.0.0.1:7777
-Public: udp.portx.infinitynoob.lol:32001
-```
-
-### Help
+### Maintenance
 
 ```bash
-portx --help
-portx http --help
-portx tcp  --help
-portx udp  --help
+portx cleanup                        # Remove orphaned config/log files
+portx cleanup --force                # Also remove stopped tunnel records
+portx uninstall                      # Complete system uninstall
 ```
 
-### Cleanup
+---
 
-If you have orphaned tunnel files or old tunnel records:
+## Configuration
 
-```bash
-portx cleanup              # Clean up orphaned config and log files
-portx cleanup --force      # Also remove all stopped tunnel records
+All settings are stored in `~/.portx/config.toml`:
+
+```toml
+[portx]
+api_url    = "http://portx.infinitynoob.lol:8765"
+auth_token = "your-token-here"
 ```
 
-This is useful if:
-- You deleted `~/.portx/` manually but tunnels are still showing
-- Old tunnels from before a reinstall are still listed
-- You see tunnel files but no corresponding records
+You never need to edit this file manually — use `portx api <token>` to update your token.
 
 ---
 
 ## How it works
 
 ```
-User runs: portx http 8080
-          ↓
-PortX CLI → POST /api/v1/tunnel → PortX API server
-                                        ↓
-                               Allocate subdomain "x7k29m"
-                               Return tunnel info + frps details
-          ↓
-PortX CLI generates temporary frpc TOML config in ~/.portx/tunnels
-          ↓
-PortX CLI starts frpc (~/.portx/bin/frpc)
-          ↓
-frpc connects to frps on portx.infinitynoob.lol:7000
-          ↓
-Tunnel is live: https://x7k29m.portx.infinitynoob.lol → 127.0.0.1:8080
-          ↓
-portx stop → frpc stops → temp TOML deleted → server notified
+portx http 8080
+    │
+    ├─ POST /api/v1/tunnel  →  PortX API server
+    │                              │
+    │                         Allocate subdomain
+    │                         Return frps details
+    │
+    ├─ Generate frpc TOML config in ~/.portx/tunnels/
+    │
+    ├─ Spawn background frpc process
+    │
+    └─ Tunnel live: https://<subdomain>.infinitynoob.lol → 127.0.0.1:8080
+
+portx stop my-app
+    └─ Kill frpc → Notify server → Update state
 ```
-
----
-
-## Supported platforms (installer)
-
-| OS    | Architecture          | FRP asset suffix |
-|-------|-----------------------|-----------------|
-| macOS | ARM64 (Apple Silicon) | `darwin_arm64`  |
-| macOS | AMD64 (Intel)         | `darwin_amd64`  |
-| Linux | ARM64                 | `linux_arm64`   |
-| Linux | AMD64                 | `linux_amd64`   |
 
 ---
 
@@ -182,153 +147,89 @@ portx stop → frpc stops → temp TOML deleted → server notified
 
 ```
 portx/
-├── portx                        ← Development entry point: ./portx http 8080
-├── installer/
-│   └── portx_install.py         # Installer: downloads CLI + FRP, installs to ~/.local/bin
+├── portx                         ← Dev entry point (./portx http 8080)
 ├── cli/
-│   ├── portx.py                 # CLI entry point
-│   ├── commands.py              # CLI commands (start, stop, list, etc.)
-│   ├── config.py                # Centralized server config
-│   ├── api_client.py            # PortX API client
-│   ├── state.py                 # State management (tunnels.toml)
-│   ├── frp_config.py            # FRP TOML generator
-│   ├── frp_runner.py            # FRP process manager
-│   ├── worker.py                # Background daemon process
-│   └── address.py               # Address parsing utilities
+│   ├── portx.py                  # CLI entry point & argument parsing
+│   ├── commands.py               # Command implementations
+│   ├── config.py                 # Config manager (~/.portx/config.toml)
+│   ├── api_client.py             # PortX API client (auth-aware)
+│   ├── state.py                  # Tunnel state (tunnels.toml)
+│   ├── frp_config.py             # frpc TOML generator
+│   ├── frp_runner.py             # frpc process manager
+│   ├── worker.py                 # Background daemon
+│   └── address.py                # Address parsing utilities
+├── installer/
+│   └── portx_install.py          # Installer (downloads CLI + FRP)
 ├── server/
-│   ├── portx_server.py          # PortX API server (runs on VPS)
-│   ├── frps.toml                # frps config for VPS
-│   └── setup.sh                 # One-command VPS setup
+│   ├── portx_server.py           # PortX API server (VPS)
+│   ├── frps.toml                 # frps configuration
+│   └── setup.sh                  # One-command VPS setup
 ├── Formula/
-│   └── portx-cli.rb             # Homebrew formula
+│   └── portx-cli.rb              # Homebrew formula
 └── scripts/
-    └── install-macos.sh         # curl-pipe installer script
+    ├── install-macos.sh           # macOS curl-pipe installer
+    └── install-linux.sh           # Linux curl-pipe installer
 ```
 
-**Installation Layout:**
-- `~/.local/bin/portx` — CLI executable (works globally)
-- `~/.portx/bin/frpc` — FRP client binary
-- `~/.portx/tunnels.toml` — Persistent tunnel state
-- `~/.portx/tunnels/` — Per-tunnel FRP configs
-- `~/.portx/logs/` — Tunnel logs
+**Runtime layout:**
+
+| Path | Purpose |
+|------|---------|
+| `~/.local/bin/portx` | CLI executable |
+| `~/.portx/config.toml` | Auth token + API URL |
+| `~/.portx/tunnels.toml` | Tunnel state |
+| `~/.portx/bin/frpc` | FRP client binary |
+| `~/.portx/tunnels/` | Per-tunnel frpc configs |
+| `~/.portx/logs/` | Tunnel logs |
 
 ---
 
-## VPS deployment
+## Supported platforms
+
+| OS | Architecture | FRP asset |
+|----|-------------|-----------|
+| macOS | ARM64 (Apple Silicon) | `darwin_arm64` |
+| macOS | AMD64 (Intel) | `darwin_amd64` |
+| Linux | ARM64 | `linux_arm64` |
+| Linux | AMD64 | `linux_amd64` |
+
+---
+
+## Uninstallation
 
 ```bash
-# On your VPS (as root):
-git clone https://github.com/aushaif/portX /opt/portx-src
-sudo bash /opt/portx-src/server/setup.sh
+portx uninstall
 ```
 
-The setup script:
-1. Installs `frps` from official GitHub Releases
-2. Deploys `portx_server.py` and `frps.toml`
-3. Creates systemd services for both
-4. Opens required firewall ports
+Removes `~/.local/bin/portx` and `~/.portx/` (runtime data, tunnels, config).
 
-Verify:
+**If installed via Homebrew:**
 
 ```bash
-systemctl status frps portx-api
-curl http://localhost:8765/health
+brew uninstall portx
+rm -rf ~/.portx     # Optional: remove runtime data and config
 ```
-
----
-
-## Server configuration
-
-All server addresses are configurable via environment variables — never hardcoded:
-
-| Variable            | Default                        | Description              |
-|---------------------|--------------------------------|--------------------------|
-| `PORTX_API_URL`     | `http://portx.infinitynoob.lol:8765` | PortX API server URL |
-| `PORTX_FRPS_HOST`   | `portx.infinitynoob.lol`       | frps hostname            |
-| `PORTX_FRPS_PORT`   | `7000`                         | frps port                |
-| `PORTX_HTTP_DOMAIN` | `portx.infinitynoob.lol`       | HTTP wildcard domain     |
-| `PORTX_TCP_DOMAIN`  | `tcp.portx.infinitynoob.lol`   | TCP tunnel hostname      |
-| `PORTX_UDP_DOMAIN`  | `udp.portx.infinitynoob.lol`   | UDP tunnel hostname      |
-| `PORTX_FRP_BINARY`  | `~/.portx/bin/frpc`        | Path to frpc binary      |
-
----
-
-## DNS records required
-
-| Record              | Type  | Target         | Notes                     |
-|---------------------|-------|----------------|---------------------------|
-| `*.portx.infinitynoob.lol` | A | VPS IP | Wildcard for HTTP tunnels |
-| `tcp.portx.infinitynoob.lol` | A | VPS IP | DNS-only, no proxy     |
-| `udp.portx.infinitynoob.lol` | A | VPS IP | DNS-only, no proxy     |
-| `portx.infinitynoob.lol`   | A | VPS IP | API + frps               |
-
----
-
-## Scope
-
-### v2 — implemented
-
-- `portx list` — View all background tunnels
-- `portx stop <name>` — Stop a specific tunnel
-- `portx remove <name>` — Delete a stopped tunnel
-- `portx remove --all` — Wipe all tunnels completely
-- `portx restart <name>` — Restart a tunnel
-- `portx cleanup` — Clean up orphaned files
-- `portx uninstall` — Complete system uninstall
-- Automatic daemonization (no terminal window required)
-- macOS Homebrew support
-- PATH integration (run `portx` from anywhere)
-
-### Not yet implemented
-
-- User accounts / authentication
-- Dashboard
-- Custom domains
 
 ---
 
 ## Troubleshooting
 
-### Old/orphaned tunnels showing up
-
-If you see an old tunnel (like `https://boka.infinitynoob.lol/`) running that's not in your `portx list`, this means:
-
-1. The tunnel was created before but the local state was lost (e.g., you deleted `~/.portx/` manually)
-2. The server still has it allocated
-
-**Solution:**
-
-The tunnel will remain active on the server until the FRP client disconnects or the server is restarted. Since you lost the local state, you have two options:
-
-1. **Wait it out**: The server will eventually clean up inactive tunnels (when FRP connection drops)
-2. **Contact server admin**: Ask them to restart the FRP server (`frps`) which will clear all allocations
-3. **Use cleanup command**: Run `portx cleanup --force` to clean up any local state mismatches
-
-**Prevention:**
-
-Always use `portx stop <name>` or `portx remove <name>` to properly shut down tunnels. This notifies the server to release the allocation.
-
-### Missing FRP binary
-
-If you see "FRP binary not found" errors:
+### `portx` command not found
 
 ```bash
-# Check if frpc exists
-ls -la ~/.portx/bin/frpc
-
-# Reinstall if missing
-curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-macos.sh | bash
-```
-
-### PATH issues
-
-If `portx` command is not found:
-
-```bash
-# Check if installed
-ls -la ~/.local/bin/portx
-
-# Add to PATH
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 ```
+
+### FRP binary missing
+
+```bash
+ls -la ~/.portx/bin/frpc
+
+# Reinstall to restore
+curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-macos.sh | bash
+```
+
+### Old tunnels still showing
+
+Use `portx cleanup --force` to remove stopped tunnel records and orphaned files.

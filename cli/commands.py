@@ -246,25 +246,66 @@ def cmd_restart(name: str) -> None:
 
 def cmd_status() -> None:
     tunnels = _state.list_tunnels()
-    
+
     running = sum(1 for t in tunnels.values() if t.get("status") == "running")
     stopped = sum(1 for t in tunnels.values() if t.get("status") in ("stopped", "failed"))
-    
+
     print("\n  PortX v2.0\n")
-    
-    # Check server
+
+    api_url = _cfg.get_api_url()
+
+    # Check server reachability
     server_status = "Connected"
     try:
         import urllib.request
-        req = urllib.request.Request(f"{_cfg.PORTX_API_URL}/health")
+        req = urllib.request.Request(f"{api_url}/health")
         with urllib.request.urlopen(req, timeout=3) as r:
             pass
     except Exception:
         server_status = "Unreachable"
-        
+
     print(f"  Server:    {server_status}")
+    print(f"  API URL:   {api_url}")
     print(f"  Tunnels:   {running} running")
     print(f"  Stopped:   {stopped}")
+    print()
+
+
+def cmd_api_set(token: str) -> None:
+    """Save the PortX auth token to ~/.portx/config.toml."""
+    token = token.strip()
+    if not token:
+        print("\n  ✗ Token cannot be empty.\n", file=sys.stderr)
+        sys.exit(1)
+
+    _cfg.set_auth_token(token)
+
+    masked = token[:6] + "*" * max(0, len(token) - 6)
+    print(f"\n  ✓ Auth token updated: {masked}")
+    print(f"  Saved to: {_cfg.CONFIG_TOML}\n")
+
+
+def cmd_api_ls() -> None:
+    """Display the currently configured API URL and token status."""
+    from pathlib import Path
+    cfg_path = _cfg.CONFIG_TOML
+
+    api_url = _cfg.get_api_url()
+
+    # Load token without triggering the interactive prompt
+    try:
+        import config as _c
+        raw = _c._load_config()
+        token = raw.get("portx", {}).get("auth_token", "").strip()
+    except Exception:
+        token = ""
+
+    token_display = (token[:6] + "*" * max(0, len(token) - 6)) if token else "(not set)"
+
+    print()
+    print(f"  API URL:    {api_url}")
+    print(f"  Auth token: {token_display}")
+    print(f"  Config:     {cfg_path}")
     print()
 
 

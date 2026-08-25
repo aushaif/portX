@@ -32,11 +32,9 @@ API contract:
 from __future__ import annotations
 
 import json
-import sys
 import urllib.error
 import urllib.request
 
-# Import config from same directory (sys.path is set by portx.py entrypoint)
 import config as _cfg
 
 
@@ -49,10 +47,15 @@ class APIError(Exception):
 # ---------------------------------------------------------------------------
 
 def _request(method: str, path: str, body: dict | None = None) -> dict | None:
-    url = f"{_cfg.PORTX_API_URL}{path}"
+    api_url = _cfg.get_api_url()
+    url = f"{api_url}{path}"
     data = json.dumps(body).encode() if body is not None else None
 
-    headers: dict[str, str] = {"User-Agent": "PortX-Client/2.0"}
+    token = _cfg.get_auth_token()
+    headers: dict[str, str] = {
+        "User-Agent":    "PortX-Client/2.0",
+        "Authorization": f"Bearer {token}",
+    }
     if data:
         headers["Content-Type"] = "application/json"
 
@@ -73,7 +76,7 @@ def _request(method: str, path: str, body: dict | None = None) -> dict | None:
         raise APIError(f"PortX server error: {msg}")
     except urllib.error.URLError as exc:
         raise APIError(
-            f"Cannot reach PortX server at {_cfg.PORTX_API_URL}\n"
+            f"Cannot reach PortX server at {api_url}\n"
             f"  Reason: {exc.reason}\n"
             "  Check your internet connection and try again."
         )

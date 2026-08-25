@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# PortX installer (macOS & Linux)
-# Usage: curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-macos.sh | bash
+# PortX installer — Linux
+# Usage: curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-linux.sh | bash
 set -euo pipefail
 
 echo ""
-echo "  PortX — Installer"
+echo "  PortX — Installer (Linux)"
 echo "  ─────────────────────────────────────────"
 echo ""
 
@@ -28,7 +28,7 @@ fi
 
 # ── Download and run the Python installer ────────────────────────────────
 INSTALLER_URL="https://raw.githubusercontent.com/aushaif/portX/main/installer/portx_install.py"
-TMP_SCRIPT="$(mktemp "${TMPDIR:-/tmp}/portx_install_XXXXXX.py")"
+TMP_SCRIPT="$(mktemp /tmp/portx_install_XXXXXX.py)"
 
 cleanup() { rm -f "$TMP_SCRIPT"; }
 trap cleanup EXIT
@@ -37,21 +37,16 @@ curl -fsSL "$INSTALLER_URL" -o "$TMP_SCRIPT"
 "$PYTHON" "$TMP_SCRIPT"
 
 # ── Add ~/.local/bin to PATH if not already there ────────────────────────
-SHELL_RC=""
+LOCAL_BIN="$HOME/.local/bin"
+
+# Linux: prefer ~/.bashrc, fall back to ~/.zshrc if zsh is the active shell
 if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "${SHELL:-}")" = "zsh" ]; then
   SHELL_RC="$HOME/.zshrc"
-elif [ -n "${BASH_VERSION:-}" ] || [ "$(basename "${SHELL:-}")" = "bash" ]; then
-  if [ "$(uname)" = "Darwin" ]; then
-    # macOS uses .bash_profile
-    SHELL_RC="$HOME/.bash_profile"
-  else
-    # Linux uses .bashrc
-    SHELL_RC="$HOME/.bashrc"
-  fi
+else
+  SHELL_RC="$HOME/.bashrc"
 fi
 
-LOCAL_BIN="$HOME/.local/bin"
-if [ -n "$SHELL_RC" ] && ! grep -q "$LOCAL_BIN" "$SHELL_RC" 2>/dev/null; then
+if ! grep -q "$LOCAL_BIN" "$SHELL_RC" 2>/dev/null; then
   echo "" >> "$SHELL_RC"
   echo "# Added by PortX installer" >> "$SHELL_RC"
   echo "export PATH=\"$LOCAL_BIN:\$PATH\"" >> "$SHELL_RC"

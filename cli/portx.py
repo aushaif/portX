@@ -175,6 +175,7 @@ def main() -> None:
         print("    remove    Permanently delete a tunnel")
         print("    restart   Restart a stopped tunnel")
         print("    status    Show PortX system status")
+        print("    api       Set auth token or show config")
         print("    cleanup   Clean up orphaned tunnel files")
         print("    uninstall Complete system uninstall of PortX\n")
         print("  Run 'portx <command> --help' for more information on a command.")
@@ -236,6 +237,24 @@ def main() -> None:
     # --- UNINSTALL ---
     subparsers.add_parser("uninstall", help="Complete system uninstall of PortX")
 
+    # --- API ---
+    p_api = subparsers.add_parser(
+        "api",
+        help="Set auth token or show config",
+        description=(
+            "Manage your PortX auth token and API configuration.\n\n"
+            "  portx api <token>   Set or update your auth token\n"
+            "  portx api ls        Show the current API URL and token\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_api.add_argument(
+        "subcommand",
+        nargs="?",
+        metavar="<token>|ls",
+        help="Auth token to save, or 'ls' to display current config",
+    )
+
     args = parser.parse_args()
 
     try:
@@ -271,6 +290,14 @@ def main() -> None:
             _cmds.cmd_cleanup(args.force)
         elif args.command == "uninstall":
             _cmds.cmd_uninstall()
+        elif args.command == "api":
+            sub = getattr(args, "subcommand", None)
+            if sub is None or sub == "":
+                _err("Usage: portx api <token>  or  portx api ls")
+            elif sub == "ls":
+                _cmds.cmd_api_ls()
+            else:
+                _cmds.cmd_api_set(sub)
     except KeyboardInterrupt:
         print("\n")
         sys.exit(0)

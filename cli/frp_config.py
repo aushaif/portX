@@ -10,6 +10,8 @@ Uses FRP v0.52+ TOML format.
 
 from __future__ import annotations
 
+import config as _cfg
+
 
 # ---------------------------------------------------------------------------
 # Internal
@@ -17,11 +19,12 @@ from __future__ import annotations
 
 def _base(frps_host: str, frps_port: int) -> str:
     """Common [server] section shared by all tunnel types."""
+    auth_token = _cfg.get_auth_token()
     return (
         f'serverAddr = "{frps_host}"\n'
         f"serverPort = {frps_port}\n"
         'auth.method = "token"\n'
-        'auth.token = "k3rnel-p4nic"\n'
+        f'auth.token = "{auth_token}"\n'
         "\n"
         "[log]\n"
         'level = "warn"\n'
