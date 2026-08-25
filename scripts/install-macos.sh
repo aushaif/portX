@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# PortX installer — Linux
-# Usage: curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-linux.sh | bash
+# PortX installer — macOS
+# Usage: curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-macos.sh | bash
 set -euo pipefail
 
 echo ""
-echo "  PortX — Installer (Linux)"
+echo "  PortX — Installer (macOS)"
 echo "  ─────────────────────────────────────────"
 echo ""
 
 # ── Python version check & install ───────────────────────────────────────
-# We require Python 3.12+ (modern, available in all major distros)
+# We require Python 3.12+ (modern, widely available via Homebrew)
 MIN_MAJOR=3
 MIN_MINOR=12
 
@@ -38,49 +38,23 @@ for cmd in python3.13 python3.12 python3 python; do
 done
 
 if [ -z "$PYTHON" ]; then
-  echo "  ⚠  Python ${MIN_MAJOR}.${MIN_MINOR}+ not found. Attempting to install..."
+  echo "  ⚠  Python ${MIN_MAJOR}.${MIN_MINOR}+ not found. Attempting to install via Homebrew..."
   echo ""
 
-  INSTALLED=false
-
-  # Try apt-get (Debian/Ubuntu)
-  if command -v apt-get &>/dev/null; then
-    echo "  → Installing Python via apt-get..."
-    sudo apt-get update -qq
-    sudo apt-get install -y python3 python3-pip
-    INSTALLED=true
-
-  # Try dnf (Fedora/RHEL 8+)
-  elif command -v dnf &>/dev/null; then
-    echo "  → Installing Python via dnf..."
-    sudo dnf install -y python3 python3-pip
-    INSTALLED=true
-
-  # Try yum (CentOS/RHEL 7)
-  elif command -v yum &>/dev/null; then
-    echo "  → Installing Python via yum..."
-    sudo yum install -y python3 python3-pip
-    INSTALLED=true
-
-  # Try pacman (Arch Linux)
-  elif command -v pacman &>/dev/null; then
-    echo "  → Installing Python via pacman..."
-    sudo pacman -Sy --noconfirm python python-pip
-    INSTALLED=true
-
-  # Try zypper (openSUSE)
-  elif command -v zypper &>/dev/null; then
-    echo "  → Installing Python via zypper..."
-    sudo zypper install -y python3 python3-pip
-    INSTALLED=true
+  # Ensure Homebrew is available
+  if ! command -v brew &>/dev/null; then
+    echo "  → Homebrew not found. Installing Homebrew first..."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    # Source brew for Apple Silicon
+    if [ -f /opt/homebrew/bin/brew ]; then
+      eval "$(/opt/homebrew/bin/brew shellenv)"
+    elif [ -f /usr/local/bin/brew ]; then
+      eval "$(/usr/local/bin/brew shellenv)"
+    fi
   fi
 
-  if [ "$INSTALLED" = false ]; then
-    echo "  ✗ No supported package manager found." >&2
-    echo "    Please install Python ${MIN_MAJOR}.${MIN_MINOR}+ manually:" >&2
-    echo "    https://www.python.org/downloads/" >&2
-    exit 1
-  fi
+  echo "  → Installing/upgrading Python via Homebrew..."
+  brew install python3 || brew upgrade python3
 
   # Re-locate Python after install
   for cmd in python3.13 python3.12 python3; do
@@ -107,7 +81,7 @@ fi
 
 # ── Download and run the Python installer ────────────────────────────────
 INSTALLER_URL="https://raw.githubusercontent.com/aushaif/portX/main/installer/portx_install.py"
-TMP_SCRIPT="$(mktemp /tmp/portx_install_XXXXXX.py)"
+TMP_SCRIPT="$(mktemp "${TMPDIR:-/tmp}/portx_install_XXXXXX.py")"
 
 cleanup() { rm -f "$TMP_SCRIPT"; }
 trap cleanup EXIT
@@ -118,11 +92,11 @@ curl -fsSL "$INSTALLER_URL" -o "$TMP_SCRIPT"
 # ── Add ~/.local/bin to PATH if not already there ────────────────────────
 LOCAL_BIN="$HOME/.local/bin"
 
-# Linux: prefer ~/.bashrc, fall back to ~/.zshrc if zsh is the active shell
+# macOS: prefer ~/.zshrc (zsh default since Catalina), fall back to ~/.bash_profile
 if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "${SHELL:-}")" = "zsh" ]; then
   SHELL_RC="$HOME/.zshrc"
 else
-  SHELL_RC="$HOME/.bashrc"
+  SHELL_RC="$HOME/.bash_profile"
 fi
 
 if ! grep -q "$LOCAL_BIN" "$SHELL_RC" 2>/dev/null; then
