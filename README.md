@@ -26,7 +26,7 @@ Both scripts install:
 - FRP client binary → `~/.portx/bin/frpc`
 - Runtime directories → `~/.portx/` (tunnels/, logs/, tunnels.toml)
 
-**Requirements:** Python 3.8+
+**Requirements:** Python 3.12+ (automatically installed by the script if missing)
 
 ### Homebrew (macOS only)
 
@@ -201,7 +201,11 @@ portx/
 portx uninstall
 ```
 
-Removes `~/.local/bin/portx` and `~/.portx/` (runtime data, tunnels, config).
+This removes **everything** PortX installed:
+- `~/.portx/` — runtime data, tunnels, config, FRP binary
+- `~/.local/bin/portx` — CLI executable
+- `~/.local/lib/portx/` — CLI library files
+- All background frpc tunnel processes are killed
 
 **If installed via Homebrew:**
 

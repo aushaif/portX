@@ -175,54 +175,116 @@ def cmd_remove_all() -> None:
     print("\n  ✓ All tunnels removed permanently.\n")
 
 
+def _kill_all_portx_processes() -> None:
+    """Kill every frpc and portx worker process on the system, regardless of state."""
+    targets = ["worker.py", str(Path.home() / ".portx" / "bin" / "frpc"), "frpc"]
+    killed = 0
+    for pattern in targets:
+        try:
+            result = subprocess.run(
+                ["pgrep", "-f", pattern],
+                capture_output=True, text=True
+            )
+            for pid_str in result.stdout.strip().splitlines():
+                try:
+                    pid = int(pid_str.strip())
+                    if pid == os.getpid():
+                        continue  # never kill ourselves
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                        killed += 1
+                    except OSError:
+                        pass
+                except ValueError:
+                    pass
+        except FileNotFoundError:
+            pass  # pgrep not available
+        except Exception:
+            pass
+
+    if killed:
+        time.sleep(0.8)  # give processes time to die
+    print(f"  ✓ Terminated {killed} background process(es).")
+
+
 def cmd_uninstall() -> None:
-    """Complete system uninstall of PortX."""
+    """Complete system uninstall of PortX — removes every file PortX installed."""
     print("\n  PortX Uninstaller")
     print("  ─────────────────────────────────────────\n")
-    
+
     # 1. Check if Homebrew-managed
     portx_bin = shutil.which("portx")
-    is_homebrew = portx_bin and ("homebrew" in portx_bin.lower() or "cellar" in portx_bin.lower() or "/opt/homebrew" in portx_bin)
-    
+    is_homebrew = portx_bin and (
+        "homebrew" in portx_bin.lower()
+        or "cellar" in portx_bin.lower()
+        or "/opt/homebrew" in portx_bin
+    )
     if is_homebrew:
         print("  ✗ PortX was installed via Homebrew.")
         print("    Please uninstall using: brew uninstall portx")
-        print("    Note: This will preserve ~/.portx runtime data.")
-        print("    To remove runtime data manually: rm -rf ~/.portx\n")
+        print("    To remove runtime data:  rm -rf ~/.portx\n")
         sys.exit(1)
-        
-    # 2. Stop and remove all tunnels
-    tunnels = _state.list_tunnels()
-    if tunnels:
-        print("  → Stopping active tunnels...")
-        for name in list(tunnels.keys()):
-            _stop_tunnel(name, tunnels[name])
-        print("  ✓ Tunnels stopped.")
 
-    # 3. Delete ~/.portx directory (runtime data)
+    # 2. Kill ALL lingering frpc / worker processes (even if ~/.portx was deleted)
+    print("  → Killing all PortX background processes...")
+    _kill_all_portx_processes()
+
+    # 3. Stop tunnels gracefully (best-effort — state may already be gone)
+    try:
+        tunnels = _state.list_tunnels()
+        if tunnels:
+            print("  → Stopping active tunnels...")
+            for name in list(tunnels.keys()):
+                _stop_tunnel(name, tunnels[name])
+            print("  ✓ Tunnels stopped.")
+    except Exception:
+        pass
+
+    removed: list[str] = []
+
+    # 4. Delete ~/.portx/ (runtime data + config)
     portx_dir = Path.home() / ".portx"
     if portx_dir.exists():
-        print(f"  → Removing {portx_dir}...")
+        print(f"  → Removing {portx_dir} ...")
         try:
             shutil.rmtree(portx_dir)
+            removed.append("~/.portx/")
             print("  ✓ Runtime directory removed.")
         except Exception as e:
             print(f"  ✗ Failed to remove {portx_dir}: {e}")
 
-    # 4. Delete CLI executable at ~/.local/bin/portx
+    # 5. Delete CLI executable ~/.local/bin/portx
     local_bin_portx = Path.home() / ".local" / "bin" / "portx"
     if local_bin_portx.exists() or local_bin_portx.is_symlink():
-        print(f"  → Removing {local_bin_portx}...")
+        print(f"  → Removing {local_bin_portx} ...")
         try:
             local_bin_portx.unlink()
+            removed.append("~/.local/bin/portx")
             print("  ✓ CLI executable removed.")
         except Exception as e:
             print(f"  ✗ Failed to remove executable: {e}")
 
+    # 6. Delete CLI library ~/.local/lib/portx/ (installed by portx_install.py)
+    local_lib_portx = Path.home() / ".local" / "lib" / "portx"
+    if local_lib_portx.exists():
+        print(f"  → Removing {local_lib_portx} ...")
+        try:
+            shutil.rmtree(local_lib_portx)
+            removed.append("~/.local/lib/portx/")
+            print("  ✓ CLI library removed.")
+        except Exception as e:
+            print(f"  ✗ Failed to remove library directory: {e}")
+
+    # 7. Summary
     print("\n  ✓ PortX has been successfully uninstalled.\n")
-    print("  Installation artifacts removed:")
-    print("    - ~/.local/bin/portx (CLI executable)")
-    print("    - ~/.portx/ (runtime data)\n")
+    if removed:
+        print("  Removed:")
+        for path in removed:
+            print(f"    - {path}")
+    print()
+    print("  Note: PATH entries added to your shell RC file were not removed.")
+    print("  You can clean them up manually if desired.\n")
+
 
 
 def cmd_restart(name: str) -> None:

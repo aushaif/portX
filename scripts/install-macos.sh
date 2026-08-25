@@ -8,22 +8,101 @@ echo "  PortX — Installer (Linux)"
 echo "  ─────────────────────────────────────────"
 echo ""
 
-# ── Require Python 3.8+ ───────────────────────────────────────────────────
+# ── Python version check & install ───────────────────────────────────────
+# We require Python 3.12+ (modern, available in all major distros)
+MIN_MAJOR=3
+MIN_MINOR=12
+
+_get_python_version() {
+  local cmd="$1"
+  command -v "$cmd" &>/dev/null || return 1
+  "$cmd" -c "import sys; print(sys.version_info.major, sys.version_info.minor)" 2>/dev/null
+}
+
+_python_is_new_enough() {
+  local cmd="$1"
+  local ver
+  ver=$(_get_python_version "$cmd" 2>/dev/null) || return 1
+  local major minor
+  major=$(echo "$ver" | awk '{print $1}')
+  minor=$(echo "$ver" | awk '{print $2}')
+  [ "$major" -gt "$MIN_MAJOR" ] || { [ "$major" -eq "$MIN_MAJOR" ] && [ "$minor" -ge "$MIN_MINOR" ]; }
+}
+
 PYTHON=""
-for cmd in python3 python; do
-  if command -v "$cmd" &>/dev/null; then
-    version=$("$cmd" -c "import sys; print(sys.version_info >= (3, 8))" 2>/dev/null || echo "False")
-    if [ "$version" = "True" ]; then
-      PYTHON="$cmd"
-      break
-    fi
+for cmd in python3.13 python3.12 python3 python; do
+  if _python_is_new_enough "$cmd" 2>/dev/null; then
+    PYTHON="$cmd"
+    break
   fi
 done
 
 if [ -z "$PYTHON" ]; then
-  echo "  ✗ Error: Python 3.8 or higher is required." >&2
-  echo "    Install it from https://www.python.org/downloads/" >&2
-  exit 1
+  echo "  ⚠  Python ${MIN_MAJOR}.${MIN_MINOR}+ not found. Attempting to install..."
+  echo ""
+
+  INSTALLED=false
+
+  # Try apt-get (Debian/Ubuntu)
+  if command -v apt-get &>/dev/null; then
+    echo "  → Installing Python via apt-get..."
+    sudo apt-get update -qq
+    sudo apt-get install -y python3 python3-pip
+    INSTALLED=true
+
+  # Try dnf (Fedora/RHEL 8+)
+  elif command -v dnf &>/dev/null; then
+    echo "  → Installing Python via dnf..."
+    sudo dnf install -y python3 python3-pip
+    INSTALLED=true
+
+  # Try yum (CentOS/RHEL 7)
+  elif command -v yum &>/dev/null; then
+    echo "  → Installing Python via yum..."
+    sudo yum install -y python3 python3-pip
+    INSTALLED=true
+
+  # Try pacman (Arch Linux)
+  elif command -v pacman &>/dev/null; then
+    echo "  → Installing Python via pacman..."
+    sudo pacman -Sy --noconfirm python python-pip
+    INSTALLED=true
+
+  # Try zypper (openSUSE)
+  elif command -v zypper &>/dev/null; then
+    echo "  → Installing Python via zypper..."
+    sudo zypper install -y python3 python3-pip
+    INSTALLED=true
+  fi
+
+  if [ "$INSTALLED" = false ]; then
+    echo "  ✗ No supported package manager found." >&2
+    echo "    Please install Python ${MIN_MAJOR}.${MIN_MINOR}+ manually:" >&2
+    echo "    https://www.python.org/downloads/" >&2
+    exit 1
+  fi
+
+  # Re-locate Python after install
+  for cmd in python3.13 python3.12 python3; do
+    if _python_is_new_enough "$cmd" 2>/dev/null; then
+      PYTHON="$cmd"
+      break
+    fi
+  done
+
+  if [ -z "$PYTHON" ]; then
+    echo "" >&2
+    echo "  ✗ Could not install Python ${MIN_MAJOR}.${MIN_MINOR}+." >&2
+    echo "    Please install it manually from https://www.python.org/downloads/" >&2
+    exit 1
+  fi
+
+  echo "  ✓ Python installed successfully."
+  echo ""
+else
+  VER=$(_get_python_version "$PYTHON")
+  echo "  ✓ Python $VER found: $PYTHON"
+  echo ""
 fi
 
 # ── Download and run the Python installer ────────────────────────────────
