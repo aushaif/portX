@@ -271,59 +271,213 @@ def cmd_restart(name: str) -> None:
     print(f"  Public: {t.get('public_url')}\n")
 
 
+def _prompt(label: str, current: str | int | None, cast=str) -> str | int:
+    """Show a prompt with the current value; return new value or keep current."""
+    disp = str(current) if current is not None else ""
+    try:
+        raw = input(f"  {label} [{disp}]: ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print()
+        sys.exit(0)
+    if not raw:
+        return current  # type: ignore[return-value]
+    if cast == int:
+        try:
+            return int(raw)
+        except ValueError:
+            print(f"  ✗ Invalid integer '{raw}', keeping current value.")
+            return current  # type: ignore[return-value]
+    return raw
+
+
 def cmd_edit(name: str) -> None:
+    """
+    Interactively edit a tunnel's configuration via a step-by-step prompt UI.
+
+    Editable fields:
+      • Tunnel name (renames all saved state and config files)
+      • Tunnel type  (http / tcp / udp)
+      • Local IP
+      • Local port
+      • For HTTP:   subdomain
+      • For TCP/UDP: remote port (server-side port)
+
+    After editing:
+      • Re-generates the frpc TOML config on disk.
+      • If the name changed, moves files and updates state references.
+      • If the tunnel is running, triggers an instant graceful reload.
+    """
+    import frp_config as _toml
+
     t = _state.get_tunnel(name)
     if not t:
         print(f"\n  ✗ Tunnel '{name}' not found.\n")
         sys.exit(1)
-        
-    config_path = t.get("frp_config_path")
-    if not config_path or not Path(config_path).exists():
-        print(f"\n  ✗ Config file not found for tunnel '{name}'.\n")
-        sys.exit(1)
-        
-    editor = os.environ.get("EDITOR", "nano")
-    
-    # Store old values to check for changes
-    old_local_host = t.get("local_host")
-    old_local_port = t.get("local_port")
-    
-    # Open editor interactively
-    subprocess.run([editor, config_path])
-    
-    # Parse new local_host and local_port if possible.
-    new_local_host = old_local_host
-    new_local_port = old_local_port
-    
-    content = Path(config_path).read_text("utf-8")
-    for line in content.splitlines():
-        line = line.strip()
-        if line.startswith("localIp") or line.startswith("localIP"):
-            parts = line.split("=")
-            if len(parts) == 2:
-                new_local_host = parts[1].strip(' "\'')
-        elif line.startswith("localPort"):
-            parts = line.split("=")
-            if len(parts) == 2:
-                try:
-                    new_local_port = int(parts[1].strip(' "\''))
-                except ValueError:
-                    pass
-                    
-    updated = False
-    if str(new_local_host) != str(old_local_host) or str(new_local_port) != str(old_local_port):
-        _state.update_tunnel(name, local_host=new_local_host, local_port=new_local_port)
-        updated = True
-        print(f"\n  ✓ Updated saved state: {new_local_host}:{new_local_port}")
-        
-    if _state.is_worker_locked(name) or t.get("status") in ("starting", "running", "reconnecting"):
-        print(f"  → Reloading tunnel '{name}' to apply changes...")
-        cmd_reload(name)
+
+    tunnel_type  = t.get("type", "http")
+    local_host   = t.get("local_host", "127.0.0.1")
+    local_port   = t.get("local_port", 8080)
+    subdomain    = t.get("subdomain", "")
+    remote_port  = t.get("remote_port")
+    proxy_name   = t.get("proxy_name", "")
+    tunnel_id    = t.get("tunnel_id", "")
+    public_url   = t.get("public_url", "")
+    frps_host    = t.get("frps_host") or _cfg.FRPS_HOST
+    frps_port    = t.get("frps_port") or _cfg.FRPS_PORT
+    config_path  = Path(t.get("frp_config_path", ""))
+    log_path     = Path(t.get("log_path", ""))
+
+    print(f"\n  ╔══════════════════════════════════════════╗")
+    print(f"  ║  Editing tunnel: {name:<25}║")
+    print(f"  ╚══════════════════════════════════════════╝")
+    print(f"  Press ENTER to keep the current value shown in [ ].\n")
+
+    # ── Tunnel name ───────────────────────────────────────────────────────
+    new_name = _prompt("Tunnel name", name)
+
+    # ── Tunnel type ───────────────────────────────────────────────────────
+    print()
+    print(f"  Tunnel type options: http, tcp, udp")
+    while True:
+        new_type = _prompt("Tunnel type", tunnel_type)
+        if new_type in ("http", "tcp", "udp"):
+            break
+        print(f"  ✗ Invalid type '{new_type}'. Choose: http, tcp, udp")
+
+    # ── Local IP ──────────────────────────────────────────────────────────
+    new_local_host = _prompt("Local IP", local_host)
+
+    # ── Local port ────────────────────────────────────────────────────────
+    new_local_port = _prompt("Local port", local_port, cast=int)
+
+    # ── Type-specific fields ──────────────────────────────────────────────
+    new_subdomain   = subdomain
+    new_remote_port = remote_port
+
+    if new_type == "http":
+        print()
+        print(f"  Subdomain → https://<subdomain>.{_cfg.HTTP_TUNNEL_DOMAIN}")
+        new_subdomain = _prompt("Subdomain", subdomain)
+        new_remote_port = None
     else:
-        if updated:
-            print(f"  ✓ Tunnel '{name}' is stopped. Start it to apply changes.\n")
-        else:
-            print(f"  ✓ Editor closed. Run 'portx restart {name}' if needed.\n")
+        domain = _cfg.TCP_TUNNEL_DOMAIN if new_type == "tcp" else _cfg.UDP_TUNNEL_DOMAIN
+        print()
+        print(f"  Remote port → {domain}:<remote_port>")
+        new_remote_port = _prompt("Remote port", remote_port, cast=int)
+        new_subdomain = None
+
+    # ── Summary & confirm ─────────────────────────────────────────────────
+    print()
+    print("  ─────────────────────────────────────────────")
+    print("  Proposed changes:")
+    print(f"    Name:        {name} → {new_name}" if new_name != name else f"    Name:        {name}")
+    print(f"    Type:        {tunnel_type} → {new_type}" if new_type != tunnel_type else f"    Type:        {tunnel_type}")
+    print(f"    Local:       {local_host}:{local_port} → {new_local_host}:{new_local_port}")
+    if new_type == "http":
+        print(f"    Subdomain:   {subdomain} → {new_subdomain}" if new_subdomain != subdomain else f"    Subdomain:   {subdomain}")
+    else:
+        print(f"    Remote port: {remote_port} → {new_remote_port}" if new_remote_port != remote_port else f"    Remote port: {remote_port}")
+    print("  ─────────────────────────────────────────────")
+    try:
+        confirm = input("  Apply these changes? [Y/n]: ").strip().lower()
+    except (KeyboardInterrupt, EOFError):
+        print("\n  ✗ Cancelled.\n")
+        sys.exit(0)
+    if confirm and confirm not in ("y", "yes"):
+        print("  ✗ Cancelled — no changes made.\n")
+        return
+
+    # ── Stop worker if running ────────────────────────────────────────────
+    was_running = _state.is_worker_locked(name) or t.get("status") in ("starting", "running", "reconnecting")
+    if was_running:
+        print("\n  → Stopping tunnel to apply changes...")
+        _stop_tunnel(name, t)
+        time.sleep(0.5)
+
+    # ── Recalculate proxy_name if type or key identifiers changed ─────────
+    if new_type == "http" and new_subdomain:
+        new_proxy_name = f"portx-http-{new_subdomain}"
+        new_public_url = f"https://{new_subdomain}.{_cfg.HTTP_TUNNEL_DOMAIN}"
+    elif new_type == "tcp" and new_remote_port:
+        new_proxy_name = f"portx-tcp-{new_remote_port}"
+        new_public_url = f"{_cfg.TCP_TUNNEL_DOMAIN}:{new_remote_port}"
+    elif new_type == "udp" and new_remote_port:
+        new_proxy_name = f"portx-udp-{new_remote_port}"
+        new_public_url = f"{_cfg.UDP_TUNNEL_DOMAIN}:{new_remote_port}"
+    else:
+        new_proxy_name = proxy_name
+        new_public_url = public_url
+
+    # ── Re-generate frpc TOML config ──────────────────────────────────────
+    new_config_path = config_path
+    new_log_path    = log_path
+
+    if new_name != name:
+        # Rename config / log paths
+        new_config_path = _state.CONFIGS_DIR / f"{new_name}.toml"
+        new_log_path    = _state.LOGS_DIR / f"{new_name}.log"
+        # Remove old files (new worker will create fresh log)
+        if config_path.exists():
+            config_path.unlink()
+        if log_path.exists():
+            log_path.rename(new_log_path)
+
+    if new_type == "http":
+        toml = _toml.generate_http_config(
+            local_host=new_local_host, local_port=int(new_local_port),
+            subdomain=new_subdomain, proxy_name=new_proxy_name,
+            frps_host=frps_host, frps_port=int(frps_port),
+        )
+    elif new_type == "tcp":
+        toml = _toml.generate_tcp_config(
+            local_host=new_local_host, local_port=int(new_local_port),
+            remote_port=int(new_remote_port), proxy_name=new_proxy_name,
+            frps_host=frps_host, frps_port=int(frps_port),
+        )
+    else:  # udp
+        toml = _toml.generate_udp_config(
+            local_host=new_local_host, local_port=int(new_local_port),
+            remote_port=int(new_remote_port), proxy_name=new_proxy_name,
+            frps_host=frps_host, frps_port=int(frps_port),
+        )
+
+    new_config_path.write_text(toml, "utf-8")
+
+    # ── Update state ──────────────────────────────────────────────────────
+    # If renamed, remove the old record first, then create the new one
+    if new_name != name:
+        _state.remove_tunnel(name)
+
+    _state.update_tunnel(
+        new_name,
+        type=new_type,
+        local_host=new_local_host,
+        local_port=int(new_local_port),
+        public_url=new_public_url,
+        proxy_name=new_proxy_name,
+        subdomain=new_subdomain if new_type == "http" else None,
+        remote_port=int(new_remote_port) if new_type in ("tcp", "udp") else None,
+        frp_config_path=str(new_config_path),
+        log_path=str(new_log_path),
+        tunnel_id=tunnel_id,
+        status="stopped",
+        admin_stopped=0,
+    )
+
+    print(f"\n  ✓ Configuration updated.")
+    if new_name != name:
+        print(f"  ✓ Tunnel renamed: '{name}' → '{new_name}'")
+
+    # ── Restart if was running ────────────────────────────────────────────
+    if was_running:
+        print(f"  → Restarting tunnel '{new_name}'...")
+        _state.update_tunnel(new_name, status="starting")
+        _spawn_worker(new_name)
+        t2 = _state.get_tunnel(new_name)
+        print(f"  ✓ Tunnel '{new_name}' restarted.")
+        print(f"  Public: {t2.get('public_url')}\n")
+    else:
+        print(f"  ✓ Run 'portx start {new_name}' to activate with the new settings.\n")
 
 
 def cmd_reload(name: str | None = None) -> None:

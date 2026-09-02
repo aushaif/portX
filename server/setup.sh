@@ -169,7 +169,8 @@ api_status=$(systemctl  is-active portx-api 2>/dev/null || true)
 # ── Open firewall ports ───────────────────────────────────────────────────
 if command -v ufw &>/dev/null; then
   info "Opening firewall ports (ufw)..."
-  ufw allow 7000/tcp   comment "frps bind port"         2>/dev/null || true
+  ufw allow 7000/tcp   comment "frps bind port (TCP control)"  2>/dev/null || true
+  ufw allow 7001/udp   comment "frps UDP bind port (UDP tunnels)" 2>/dev/null || true
   ufw allow 80/tcp     comment "frps HTTP vhost"        2>/dev/null || true
   ufw allow 443/tcp    comment "frps HTTPS vhost"       2>/dev/null || true
   ufw allow 8765/tcp   comment "PortX API"              2>/dev/null || true

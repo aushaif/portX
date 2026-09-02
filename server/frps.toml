@@ -5,8 +5,13 @@
 # Reference: https://github.com/fatedier/frp/blob/dev/conf/frps_full_example.toml
 
 # ── Server binding ────────────────────────────────────────────────────────
-# Port that frpc clients connect to
+# Port that frpc clients connect to (TCP control channel)
 bindPort = 7000
+
+# Required for UDP tunnel type — frps opens this UDP port on the VPS.
+# frpc sends UDP tunnel traffic to this port.
+# Must be open in your firewall: ufw allow 7001/udp
+bindUDPPort = 7001
 
 # ── HTTP/HTTPS virtual hosting ────────────────────────────────────────────
 # HTTP tunnels are served on port 80 (reverse-proxied behind Cloudflare)
@@ -18,9 +23,9 @@ vhostHTTPSPort = 443
 subdomainHost = "portx.infinitynoob.lol"
 
 # ── Allowed remote ports for TCP and UDP tunnels ──────────────────────────
-# Must match the ranges configured in portx_server.py
-# TCP:  30000–31999
-# UDP:  32000–33999
+# allowPorts applies to both TCP and UDP remote ports (no type distinction in FRP).
+# TCP:  30000–31999  (allocated by portx_server.py from TCP pool)
+# UDP:  32000–33999  (allocated by portx_server.py from UDP pool)
 allowPorts = [
   { start = 30000, end = 31999 },
   { start = 32000, end = 33999 },
