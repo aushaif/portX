@@ -19,12 +19,11 @@ import config as _cfg
 
 def _base(frps_host: str, frps_port: int) -> str:
     """Common [server] section shared by all tunnel types."""
-    auth_token = _cfg.get_auth_token()
     return (
         f'serverAddr = "{frps_host}"\n'
         f"serverPort = {frps_port}\n"
         'auth.method = "token"\n'
-        f'auth.token = "{auth_token}"\n'
+        f'auth.token = "{_cfg.FRPS_TOKEN}"\n'
         "\n"
         "[log]\n"
         'level = "warn"\n'

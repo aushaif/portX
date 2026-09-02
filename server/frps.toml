@@ -20,7 +20,7 @@ vhostHTTPSPort = 443
 
 # The base domain for HTTP subdomain tunnels.
 # Wildcard DNS *.portx.infinitynoob.lol must point to this VPS.
-subdomainHost = "portx.infinitynoob.lol"
+subdomainHost = "infinitynoob.lol"
 
 # ── Allowed remote ports for TCP and UDP tunnels ──────────────────────────
 # allowPorts applies to both TCP and UDP remote ports (no type distinction in FRP).

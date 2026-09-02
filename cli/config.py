@@ -21,6 +21,7 @@ CONFIG_TOML = PORTX_DIR / "config.toml"
 # ── FRP server (frps) — infrastructure constants, not user-configurable ───
 FRPS_HOST: str = os.environ.get("PORTX_FRPS_HOST", "portx.infinitynoob.lol")
 FRPS_PORT: int = int(os.environ.get("PORTX_FRPS_PORT", "7000"))
+FRPS_TOKEN: str = os.environ.get("PORTX_FRPS_TOKEN", "k3rnel-p4nic")
 
 # ── Public DNS ────────────────────────────────────────────────────────────
 HTTP_TUNNEL_DOMAIN: str = os.environ.get("PORTX_HTTP_DOMAIN", "infinitynoob.lol")
