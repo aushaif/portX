@@ -9,19 +9,11 @@ FRP binaries are downloaded directly from the official GitHub Releases — PortX
 
 ## Installation
 
-### macOS
-
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-macos.sh | bash
+curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install.sh | bash
 ```
 
-### Linux
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-linux.sh | bash
-```
-
-Both scripts install:
+This single command works for both **macOS** and **Linux**. It automatically installs:
 - PortX CLI → `~/.local/bin/portx`
 - FRP client binary → `~/.portx/bin/frpc`
 - Runtime directories → `~/.portx/` (tunnels/, logs/, tunnels.toml)
@@ -84,9 +76,13 @@ portx list                           # List all tunnels
 portx info <name>                    # Show detailed tunnel info
 portx stop <name>                    # Stop a tunnel
 portx stop --all                     # Stop all tunnels
+portx start <name>                   # Start a stopped tunnel
+portx start --all                    # Start all saved stopped tunnels
+portx restart <name>                 # Restart a stopped or running tunnel
+portx reload                         # Gracefully reload all running tunnels
+portx edit <name>                    # Interactively edit a tunnel's config
 portx remove <name>                  # Remove a tunnel permanently
 portx remove --all                   # Remove all tunnels
-portx restart <name>                 # Restart a stopped tunnel
 portx status                         # Show system status and API URL
 ```
 

@@ -136,7 +136,7 @@ def _start_tunnel(
         proxy_name=proxy_name,
         subdomain=subdomain_to_save,
         remote_port=remote_port_to_save,
-        auto_start=1 if auto_start else 0,
+        auto_start=1,
         admin_stopped=0,
     )
 
@@ -147,13 +147,10 @@ def _start_tunnel(
     print(f"  Name:        {name}")
     print(f"  Local:       {display_local}")
     print(f"  Public:      {public_url}")
-    if auto_start:
-        print(f"  Auto-start:  ★ enabled (will restart after reboot/power failure)")
     print()
     print("  ✓ Running in background\n")
-    if auto_start:
-        print("  Tip: Run 'portx watchdog install' if you haven't already,")
-        print("       to enable boot-time auto-start for all ★ tunnels.\n")
+    print("  Tip: Run 'portx watchdog install' if you haven't already,")
+    print("       to enable boot-time auto-start for all tunnels.\n")
 
 
 _HELP_EPILOG = """
@@ -161,11 +158,13 @@ Examples:
   portx http 8080                       # HTTP tunnel to local port 8080
   portx http 8080 my-app                # HTTP tunnel named 'my-app'
   portx http 8080 --subdomain test      # HTTP tunnel on test.infinitynoob.lol
-  portx http 8080 --auto-start          # Auto-restart after reboot/power failure
   portx tcp 25565                       # TCP tunnel to 25565
   portx stop my-app                     # Stop the tunnel (URL/port reserved)
-  portx restart my-app                  # Restart a stopped tunnel
+  portx start my-app                    # Start a saved tunnel
+  portx start --all                     # Start all saved stopped tunnels
+  portx restart my-app                  # Restart a running or stopped tunnel
   portx reload                          # Gracefully reload all running tunnels
+  portx edit my-app                     # Interactively edit a tunnel's configuration
   portx reload my-app                   # Reload specific tunnel
   portx list                            # View all tunnels
   portx status                          # System health overview
@@ -186,8 +185,10 @@ def main() -> None:
         print("    list        List all tunnels")
         print("    info        Show detailed info for a tunnel")
         print("    stop        Stop a running tunnel (keeps URL/port reserved)")
-        print("    restart     Restart a stopped tunnel")
+        print("    start       Start a stopped tunnel")
+        print("    restart     Restart a tunnel")
         print("    reload      Gracefully reload tunnel config (zero-downtime)")
+        print("    edit        Interactively edit a tunnel's configuration")
         print("    remove      Permanently delete a tunnel and release its URL/port")
         print("    status      Show PortX system status")
         print("    watchdog    Manage the boot-time auto-start service")
@@ -214,10 +215,6 @@ def main() -> None:
     p_http.add_argument("local_address", help="Port or host:port (e.g., 8080 or 127.0.0.1:8080)")
     p_http.add_argument("name", nargs="?", help="Optional custom tunnel name. If omitted, one is generated.")
     p_http.add_argument("--subdomain", help="Request a specific subdomain (e.g., 'noob')")
-    p_http.add_argument(
-        "--auto-start", dest="auto_start", action="store_true",
-        help="Mark this tunnel for automatic restart after reboot or power failure",
-    )
 
     # --- TCP ---
     p_tcp = subparsers.add_parser(
@@ -226,10 +223,6 @@ def main() -> None:
     )
     p_tcp.add_argument("local_address", help="Port or host:port")
     p_tcp.add_argument("name", nargs="?", help="Optional custom tunnel name")
-    p_tcp.add_argument(
-        "--auto-start", dest="auto_start", action="store_true",
-        help="Mark this tunnel for automatic restart after reboot or power failure",
-    )
 
     # --- UDP ---
     p_udp = subparsers.add_parser(
@@ -238,10 +231,6 @@ def main() -> None:
     )
     p_udp.add_argument("local_address", help="Port or host:port")
     p_udp.add_argument("name", nargs="?", help="Optional custom tunnel name")
-    p_udp.add_argument(
-        "--auto-start", dest="auto_start", action="store_true",
-        help="Mark this tunnel for automatic restart after reboot or power failure",
-    )
 
     # --- LIST ---
     subparsers.add_parser("list", help="List all tunnels",
@@ -263,6 +252,14 @@ def main() -> None:
     p_stop.add_argument("name", nargs="?", help="Tunnel name to stop")
     p_stop.add_argument("--all", action="store_true", help="Stop all active tunnels")
 
+    # --- START ---
+    p_start = subparsers.add_parser(
+        "start", help="Start a stopped tunnel",
+        description="Starts the tunnel worker process for a saved tunnel.",
+    )
+    p_start.add_argument("name", nargs="?", help="Tunnel name to start")
+    p_start.add_argument("--all", action="store_true", help="Start all saved stopped tunnels")
+
     # --- REMOVE ---
     p_remove = subparsers.add_parser(
         "remove", help="Remove a tunnel and release its URL/port",
@@ -277,6 +274,13 @@ def main() -> None:
     # --- RESTART ---
     p_restart = subparsers.add_parser("restart", help="Restart a tunnel")
     p_restart.add_argument("name", help="Tunnel name to restart")
+
+    # --- EDIT ---
+    p_edit = subparsers.add_parser(
+        "edit", help="Interactively edit a tunnel's configuration",
+        description="Opens the tunnel's configuration file in your editor ($EDITOR).",
+    )
+    p_edit.add_argument("name", help="Tunnel name to edit")
 
     # --- RELOAD ---
     p_reload = subparsers.add_parser(
@@ -347,14 +351,11 @@ def main() -> None:
 
     try:
         if args.command == "http":
-            _start_tunnel("http", args.local_address, args.name,
-                          args.subdomain, auto_start=args.auto_start)
+            _start_tunnel("http", args.local_address, args.name, args.subdomain)
         elif args.command == "tcp":
-            _start_tunnel("tcp", args.local_address, args.name,
-                          auto_start=args.auto_start)
+            _start_tunnel("tcp", args.local_address, args.name)
         elif args.command == "udp":
-            _start_tunnel("udp", args.local_address, args.name,
-                          auto_start=args.auto_start)
+            _start_tunnel("udp", args.local_address, args.name)
         elif args.command == "list":
             _cmds.cmd_list()
         elif args.command == "info":
@@ -373,8 +374,17 @@ def main() -> None:
                 _cmds.cmd_remove(args.name)
             else:
                 _err("Specify a tunnel name or use --all.")
+        elif args.command == "start":
+            if args.all:
+                _cmds.cmd_start_all()
+            elif args.name:
+                _cmds.cmd_start(args.name)
+            else:
+                _err("Specify a tunnel name or use --all.")
         elif args.command == "restart":
             _cmds.cmd_restart(args.name)
+        elif args.command == "edit":
+            _cmds.cmd_edit(args.name)
         elif args.command == "reload":
             _cmds.cmd_reload(getattr(args, "name", None))
         elif args.command == "status":

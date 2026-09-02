@@ -158,10 +158,57 @@ def cmd_stop_all() -> None:
         print("\n  ✓ No active tunnels to stop.\n")
         return
 
+    stopped = 0
     for name, t in list(tunnels.items()):
-        _stop_tunnel(name, t)
+        if _state.is_worker_locked(name) or t.get("status") in ("starting", "running", "reconnecting"):
+            _stop_tunnel(name, t)
+            stopped += 1
 
-    print("\n  ✓ All tunnels stopped.\n")
+    print(f"\n  ✓ All {stopped} active tunnels stopped.\n")
+
+def cmd_start(name: str) -> None:
+    t = _state.get_tunnel(name)
+    if not t:
+        print(f"\n  ✗ Tunnel '{name}' not found.\n")
+        sys.exit(1)
+
+    # Check if worker is already running (via lock or status)
+    if _state.is_worker_locked(name) or t.get("status") in ("starting", "running", "reconnecting"):
+        print(f"\n  ✓ Tunnel '{name}' is already running.\n")
+        return
+
+    print(f"\n  → Starting tunnel '{name}'...")
+    _state.update_tunnel(name, status="starting", admin_stopped=0)
+    _spawn_worker(name)
+
+    t = _state.get_tunnel(name)
+    print(f"  ✓ Tunnel '{name}' started.")
+    print(f"  Public: {t.get('public_url')}\n")
+
+def cmd_start_all() -> None:
+    tunnels = _state.list_tunnels()
+    if not tunnels:
+        print("\n  No saved tunnels found.\n")
+        return
+
+    print("\n  Starting all stopped tunnels...\n")
+    started = 0
+    skipped = 0
+
+    for name, t in tunnels.items():
+        if _state.is_worker_locked(name) or t.get("status") in ("starting", "running", "reconnecting"):
+            print(f"  → Skipped '{name}' (already running)")
+            skipped += 1
+            continue
+            
+        print(f"  → Starting '{name}'...")
+        _state.update_tunnel(name, status="starting", admin_stopped=0)
+        _spawn_worker(name)
+        started += 1
+
+    print()
+    print(f"  ✓ Started: {started}")
+    print(f"  ✓ Skipped: {skipped}\n")
 
 
 def cmd_remove(name: str) -> None:
@@ -222,6 +269,61 @@ def cmd_restart(name: str) -> None:
     t = _state.get_tunnel(name)
     print(f"  ✓ Tunnel '{name}' restarting.")
     print(f"  Public: {t.get('public_url')}\n")
+
+
+def cmd_edit(name: str) -> None:
+    t = _state.get_tunnel(name)
+    if not t:
+        print(f"\n  ✗ Tunnel '{name}' not found.\n")
+        sys.exit(1)
+        
+    config_path = t.get("frp_config_path")
+    if not config_path or not Path(config_path).exists():
+        print(f"\n  ✗ Config file not found for tunnel '{name}'.\n")
+        sys.exit(1)
+        
+    editor = os.environ.get("EDITOR", "nano")
+    
+    # Store old values to check for changes
+    old_local_host = t.get("local_host")
+    old_local_port = t.get("local_port")
+    
+    # Open editor interactively
+    subprocess.run([editor, config_path])
+    
+    # Parse new local_host and local_port if possible.
+    new_local_host = old_local_host
+    new_local_port = old_local_port
+    
+    content = Path(config_path).read_text("utf-8")
+    for line in content.splitlines():
+        line = line.strip()
+        if line.startswith("localIp") or line.startswith("localIP"):
+            parts = line.split("=")
+            if len(parts) == 2:
+                new_local_host = parts[1].strip(' "\'')
+        elif line.startswith("localPort"):
+            parts = line.split("=")
+            if len(parts) == 2:
+                try:
+                    new_local_port = int(parts[1].strip(' "\''))
+                except ValueError:
+                    pass
+                    
+    updated = False
+    if str(new_local_host) != str(old_local_host) or str(new_local_port) != str(old_local_port):
+        _state.update_tunnel(name, local_host=new_local_host, local_port=new_local_port)
+        updated = True
+        print(f"\n  ✓ Updated saved state: {new_local_host}:{new_local_port}")
+        
+    if _state.is_worker_locked(name) or t.get("status") in ("starting", "running", "reconnecting"):
+        print(f"  → Reloading tunnel '{name}' to apply changes...")
+        cmd_reload(name)
+    else:
+        if updated:
+            print(f"  ✓ Tunnel '{name}' is stopped. Start it to apply changes.\n")
+        else:
+            print(f"  ✓ Editor closed. Run 'portx restart {name}' if needed.\n")
 
 
 def cmd_reload(name: str | None = None) -> None:

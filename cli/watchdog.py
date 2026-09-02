@@ -4,7 +4,7 @@ PortX Watchdog — boot-time tunnel auto-start daemon.
 Spawned at login/boot via a macOS LaunchAgent or Linux systemd --user service.
 
 Responsibilities:
-  - On startup: find all tunnels marked auto_start=1 and ensure their
+  - On startup: find all tunnels not explicitly stopped and ensure their
     worker processes are alive.
   - Every 30 seconds: re-check liveness and restart any dead workers.
   - Log all actions to ~/.portx/logs/watchdog.log.
@@ -81,10 +81,6 @@ def _check_and_restore() -> None:
     """Inspect all tunnels and restart any that should be running but aren't."""
     tunnels = _state.load_tunnels()
     for name, t in tunnels.items():
-        # Only manage tunnels that are opted into auto-start
-        if not t.get("auto_start"):
-            continue
-
         # Don't restart tunnels that were deliberately stopped by the user
         if t.get("admin_stopped"):
             continue
