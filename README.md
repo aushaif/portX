@@ -10,7 +10,7 @@ FRP binaries are downloaded directly from the official GitHub Releases — PortX
 ## Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-macos.sh | bash
 ```
 
 This single command works for both **macOS** and **Linux**. It automatically installs:
