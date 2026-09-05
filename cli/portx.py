@@ -170,21 +170,30 @@ def _start_tunnel(
 
 _HELP_EPILOG = """
 Examples:
-  portx http 8080                       # HTTP tunnel to local port 8080
-  portx http 8080 my-app                # HTTP tunnel named 'my-app'
-  portx http 8080 --subdomain test      # HTTP tunnel on test.infinitynoob.lol
-  portx tcp 25565                       # TCP tunnel to 25565
-  portx stop my-app                     # Stop the tunnel (URL/port reserved)
-  portx start my-app                    # Start a saved tunnel
-  portx start --all                     # Start all saved stopped tunnels
-  portx restart my-app                  # Restart a running or stopped tunnel
-  portx reload                          # Gracefully reload all running tunnels
-  portx edit my-app                     # Interactively edit a tunnel's configuration
-  portx reload my-app                   # Reload specific tunnel
-  portx list                            # View all tunnels
-  portx status                          # System health overview
-  portx watchdog install                # Enable boot-time auto-start service
-  portx watchdog status                 # Check watchdog health
+  portx http 8080                                       # HTTP tunnel to local port 8080
+  portx http 192.168.0.9:8080 my-app -s test            # portx http <ip:port> <name> -s <subdomain>
+  portx https 127.0.0.1:3000 my-app -s test             # portx https <ip:port> <name> -s <subdomain>
+  portx tcp 25565                                       # TCP tunnel (auto-assigned public port)
+  portx tcp 192.168.0.9:25565 mc-server -p 25565       # portx tcp <ip:port> <name> -p <remote port>
+  portx udp 7777                                        # UDP tunnel (auto-assigned public port)
+  portx udp 192.168.0.9:19132 bedrock -p 19132         # portx udp <ip:port> <name> -p <remote port>
+  portx stop my-app                                     # Stop a tunnel (URL/port reserved)
+  portx stop --all                                      # Stop all active tunnels
+  portx start my-app                                    # Start a saved stopped tunnel
+  portx start --all                                     # Start all saved stopped tunnels
+  portx restart my-app                                  # Restart a running or stopped tunnel
+  portx reload                                          # Gracefully reload all running tunnels (zero-downtime)
+  portx reload my-app                                   # Gracefully reload a specific tunnel
+  portx edit my-app                                     # Interactively edit a tunnel's configuration
+  portx remove my-app                                   # Permanently delete tunnel and release URL/port
+  portx remove --all                                    # Permanently delete all tunnels
+  portx list                                            # View all tunnels and their status
+  portx info my-app                                     # Show detailed tunnel configuration
+  portx status                                          # System health and server connection
+  portx watchdog install                                # Enable boot-time auto-start background service
+  portx watchdog status                                 # Check watchdog daemon health
+  portx api <token>                                     # Set or update your auth token
+  portx api ls                                          # Show current API URL and token
 """
 
 def main() -> None:
@@ -227,6 +236,12 @@ def main() -> None:
     p_http = subparsers.add_parser(
         "http", help="Create an HTTP tunnel",
         description="Creates a persistent background HTTP tunnel exposing your local server.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  portx http 8080
+  portx http 8080 my-app
+  portx http 192.168.0.9:8080 my-app -s test
+  portx http <ip:port> <name> -s <subdomain>""",
     )
     p_http.add_argument("local_address", help="Port or host:port (e.g., 8080 or 127.0.0.1:8080)")
     p_http.add_argument("name", nargs="?", help="Optional custom tunnel name. If omitted, one is generated.")
@@ -236,6 +251,12 @@ def main() -> None:
     p_https = subparsers.add_parser(
         "https", help="Create an HTTPS tunnel",
         description="Creates a persistent background HTTPS tunnel exposing your local server.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  portx https 8080
+  portx https 8080 my-app
+  portx https 127.0.0.1:3000 my-app -s test
+  portx https <ip:port> <name> -s <subdomain>""",
     )
     p_https.add_argument("local_address", help="Port or host:port (e.g., 8080 or 127.0.0.1:8080)")
     p_https.add_argument("name", nargs="?", help="Optional custom tunnel name. If omitted, one is generated.")
@@ -245,6 +266,11 @@ def main() -> None:
     p_tcp = subparsers.add_parser(
         "tcp", help="Create a TCP tunnel",
         description="Creates a persistent background TCP tunnel exposing your local port.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  portx tcp 25565
+  portx tcp 192.168.0.9:25565 mc-server -p 25565
+  portx tcp <ip:port> <name> -p <remote port>""",
     )
     p_tcp.add_argument("local_address", help="Port or host:port")
     p_tcp.add_argument("name", nargs="?", help="Optional custom tunnel name")
@@ -254,6 +280,11 @@ def main() -> None:
     p_udp = subparsers.add_parser(
         "udp", help="Create a UDP tunnel",
         description="Creates a persistent background UDP tunnel exposing your local port.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  portx udp 7777
+  portx udp 192.168.0.9:19132 bedrock -p 19132
+  portx udp <ip:port> <name> -p <remote port>""",
     )
     p_udp.add_argument("local_address", help="Port or host:port")
     p_udp.add_argument("name", nargs="?", help="Optional custom tunnel name")

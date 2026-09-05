@@ -62,31 +62,31 @@ portx api <your-token>
 ### Create tunnels
 
 ```bash
-portx http 8080                           # HTTP tunnel to local port 8080
-portx http 8080 my-app                    # Named HTTP tunnel
-portx http 8080 --s test                  # HTTP tunnel on test.infinitynoob.lol (--s or --subdomain)
-portx https 8080 --s test                 # HTTPS tunnel on test.infinitynoob.lol
-portx tcp 25565                           # TCP tunnel (random public port assigned)
-portx tcp 192.168.0.9:25565 --p 25565    # TCP tunnel with custom public port (1-65000, --p or --port)
-portx udp 7777                            # UDP tunnel (random public port assigned)
-portx udp 192.168.0.9:19132 --p 19132    # UDP tunnel with custom public port (1-65000, --p or --port)
+portx http 8080                                       # HTTP tunnel to local port 8080
+portx http 192.168.0.9:8080 my-app -s test            # portx http <ip:port> <name> -s <subdomain>
+portx https 127.0.0.1:3000 my-app -s test             # portx https <ip:port> <name> -s <subdomain>
+portx tcp 25565                                       # TCP tunnel (auto-assigned public port)
+portx tcp 192.168.0.9:25565 mc-server -p 25565       # portx tcp <ip:port> <name> -p <remote port>
+portx udp 7777                                        # UDP tunnel (auto-assigned public port)
+portx udp 192.168.0.9:19132 bedrock -p 19132         # portx udp <ip:port> <name> -p <remote port>
 ```
 
 ### Manage tunnels
 
 ```bash
-portx list                           # List all tunnels
-portx info <name>                    # Show detailed tunnel info
-portx stop <name>                    # Stop a tunnel
-portx stop --all                     # Stop all tunnels
-portx start <name>                   # Start a stopped tunnel
-portx start --all                    # Start all saved stopped tunnels
-portx restart <name>                 # Restart a stopped or running tunnel
-portx reload                         # Gracefully reload all running tunnels
-portx edit <name>                    # Interactively edit a tunnel's config
-portx remove <name>                  # Remove a tunnel permanently
-portx remove --all                   # Remove all tunnels
-portx status                         # Show system status and API URL
+portx list                                            # View all tunnels and their status
+portx info <name>                                     # Show detailed tunnel configuration
+portx stop <name>                                     # Stop a tunnel (URL/port reserved)
+portx stop --all                                      # Stop all active tunnels
+portx start <name>                                    # Start a saved stopped tunnel
+portx start --all                                     # Start all saved stopped tunnels
+portx restart <name>                                  # Restart a running or stopped tunnel
+portx reload                                          # Gracefully reload all running tunnels (zero-downtime)
+portx reload <name>                                   # Gracefully reload a specific tunnel
+portx edit <name>                                     # Interactively edit a tunnel's configuration
+portx remove <name>                                   # Permanently delete tunnel and release URL/port
+portx remove --all                                    # Permanently delete all tunnels
+portx status                                          # Show PortX system status and server connection
 ```
 
 ### Auth token & config
