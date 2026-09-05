@@ -321,10 +321,18 @@ def cmd_edit(name: str) -> None:
         f'local_port = {local_port}',
         "",
         "# Type-specific settings (only the relevant one will be used):",
-        f'subdomain = "{subdomain}"',
-        f'remote_port = {remote_port if remote_port else 0}',
-        ""
     ]
+    if tunnel_type == "http":
+        edit_content += [
+            f'subdomain = "{subdomain}"',
+            f'# remotePort = {remote_port if remote_port else 0}',
+        ]
+    else:
+        edit_content += [
+            f'remotePort = {remote_port if remote_port else 0}',
+            f'# subdomain = "{subdomain}"',
+        ]
+    edit_content.append("")
 
     with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as tmp:
         tmp.write("\n".join(edit_content))
@@ -356,13 +364,13 @@ def cmd_edit(name: str) -> None:
                     new_name = val
                 elif key == "type" and val in ("http", "tcp", "udp"):
                     new_type = val
-                elif key == "local_ip" and val:
+                elif key in ("local_ip", "local_host") and val:
                     new_local_host = val
                 elif key == "local_port" and val.isdigit():
                     new_local_port = int(val)
                 elif key == "subdomain":
                     new_subdomain = val
-                elif key == "remote_port" and val.isdigit():
+                elif key in ("remotePort", "remote_port") and val.isdigit():
                     new_remote_port = int(val)
     finally:
         Path(tmp_path).unlink(missing_ok=True)
@@ -374,6 +382,76 @@ def cmd_edit(name: str) -> None:
         print("\n  ✓ No changes made.\n")
         return
 
+    # 4b. Validate local_port
+    if not (1 <= new_local_port <= 65535):
+        print(f"\n  ✗ Invalid local_port: {new_local_port} — must be between 1 and 65535.")
+        print(f"  Existing tunnel '{name}' was not modified.\n")
+        return
+
+    # 4c. Validate and check conflicts for remotePort / subdomain
+    tunnel_id  = t.get("tunnel_id", "")
+    proxy_name = t.get("proxy_name", "")
+    public_url = t.get("public_url", "")
+    frps_host  = t.get("frps_host") or _cfg.FRPS_HOST
+    frps_port  = t.get("frps_port") or _cfg.FRPS_PORT
+
+    if new_type in ("tcp", "udp"):
+        if not (1 <= new_remote_port <= 65000):
+            print(f"\n  ✗ Invalid remotePort: {new_remote_port} — must be between 1 and 65000.")
+            print(f"  Existing tunnel '{name}' was not modified.\n")
+            return
+
+        # Check local conflicts (TCP and UDP are independent)
+        all_tunnels = _state.list_tunnels()
+        for t_name, t_data in all_tunnels.items():
+            if t_name != name and t_data.get("type") == new_type and t_data.get("remote_port") == new_remote_port:
+                print(f"\n  ✗ Port {new_remote_port} is already in use by {new_type.upper()} tunnel '{t_name}'.")
+                print(f"  Existing tunnel '{name}' was not modified.\n")
+                return
+
+        # If port or type or host/port changed, request/verify allocation with server
+        if new_remote_port != remote_port or new_type != tunnel_type or new_local_host != local_host or new_local_port != local_port:
+            print(f"  → Validating and allocating {new_type.upper()} port {new_remote_port} with server...")
+            try:
+                info = _api.request_tunnel(new_type, new_local_host, new_local_port, remote_port=new_remote_port)
+            except _api.APIError as exc:
+                print(f"\n  ✗ Server rejected port {new_remote_port}: {exc}")
+                print(f"  Existing tunnel '{name}' was not modified.\n")
+                return
+
+            if tunnel_id:
+                _api.release_tunnel(tunnel_id)
+            tunnel_id   = info["tunnel_id"]
+            proxy_name  = info["proxy_name"]
+            public_url  = info.get("public_url", f"{_cfg.TCP_TUNNEL_DOMAIN if new_type == 'tcp' else _cfg.UDP_TUNNEL_DOMAIN}:{new_remote_port}")
+            frps_host   = info.get("frps_host", frps_host)
+            frps_port   = info.get("frps_port", frps_port)
+        else:
+            proxy_name  = proxy_name or f"portx-{new_type}-{new_remote_port}"
+            public_url  = f"{_cfg.TCP_TUNNEL_DOMAIN if new_type == 'tcp' else _cfg.UDP_TUNNEL_DOMAIN}:{new_remote_port}"
+
+    elif new_type == "http":
+        if new_subdomain != subdomain or new_type != tunnel_type or new_local_host != local_host or new_local_port != local_port:
+            print(f"  → Validating and allocating subdomain '{new_subdomain}' with server...")
+            try:
+                info = _api.request_tunnel("http", new_local_host, new_local_port, subdomain=new_subdomain)
+            except _api.APIError as exc:
+                print(f"\n  ✗ Server rejected subdomain '{new_subdomain}': {exc}")
+                print(f"  Existing tunnel '{name}' was not modified.\n")
+                return
+
+            if tunnel_id:
+                _api.release_tunnel(tunnel_id)
+            tunnel_id   = info["tunnel_id"]
+            proxy_name  = info["proxy_name"]
+            new_subdomain = info.get("subdomain", new_subdomain)
+            public_url  = f"https://{new_subdomain}.{_cfg.HTTP_TUNNEL_DOMAIN}"
+            frps_host   = info.get("frps_host", frps_host)
+            frps_port   = info.get("frps_port", frps_port)
+        else:
+            proxy_name  = proxy_name or f"portx-http-{new_subdomain}"
+            public_url  = f"https://{new_subdomain}.{_cfg.HTTP_TUNNEL_DOMAIN}"
+
     # 5. Stop worker if running
     was_running = _state.is_worker_locked(name) or t.get("status") in ("starting", "running", "reconnecting")
     if was_running:
@@ -381,25 +459,8 @@ def cmd_edit(name: str) -> None:
         _stop_tunnel(name, t)
         time.sleep(0.5)
 
-    # 6. Recalculate proxy_name and URLs
-    proxy_name = t.get("proxy_name", "")
-    public_url = t.get("public_url", "")
-    tunnel_id  = t.get("tunnel_id", "")
-    frps_host  = t.get("frps_host") or _cfg.FRPS_HOST
-    frps_port  = t.get("frps_port") or _cfg.FRPS_PORT
-
-    if new_type == "http" and new_subdomain:
-        new_proxy_name = f"portx-http-{new_subdomain}"
-        new_public_url = f"https://{new_subdomain}.{_cfg.HTTP_TUNNEL_DOMAIN}"
-    elif new_type == "tcp" and new_remote_port:
-        new_proxy_name = f"portx-tcp-{new_remote_port}"
-        new_public_url = f"{_cfg.TCP_TUNNEL_DOMAIN}:{new_remote_port}"
-    elif new_type == "udp" and new_remote_port:
-        new_proxy_name = f"portx-udp-{new_remote_port}"
-        new_public_url = f"{_cfg.UDP_TUNNEL_DOMAIN}:{new_remote_port}"
-    else:
-        new_proxy_name = proxy_name
-        new_public_url = public_url
+    new_proxy_name = proxy_name
+    new_public_url = public_url
 
     # 7. Re-generate frpc TOML config
     config_path = Path(t.get("frp_config_path", ""))

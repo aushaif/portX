@@ -174,8 +174,8 @@ if command -v ufw &>/dev/null; then
   ufw allow 80/tcp     comment "frps HTTP vhost"        2>/dev/null || true
   ufw allow 443/tcp    comment "frps HTTPS vhost"       2>/dev/null || true
   ufw allow 8765/tcp   comment "PortX API"              2>/dev/null || true
-  ufw allow 30000:31999/tcp comment "PortX TCP tunnels" 2>/dev/null || true
-  ufw allow 32000:33999/udp comment "PortX UDP tunnels" 2>/dev/null || true
+  ufw allow 1:65000/tcp comment "PortX TCP tunnels" 2>/dev/null || true
+  ufw allow 1:65000/udp comment "PortX UDP tunnels" 2>/dev/null || true
   ok "Firewall rules applied"
 fi
 

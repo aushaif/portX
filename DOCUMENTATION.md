@@ -144,21 +144,22 @@ portx api <your-token>
 
 ## 5. CLI Commands Reference
 
-### `portx http <address> [name] [--subdomain <sub>]`
+### `portx http <address> [name] [--s <sub>]` / `portx https <address> [name] [--s <sub>]`
 
-Create an HTTP tunnel exposing your local web server.
+Create an HTTP or HTTPS tunnel exposing your local web server.
 
-| Argument      | Description |
-|---------------|-------------|
-| `address`     | Local port (e.g. `8080`) or `host:port` (e.g. `127.0.0.1:3000`) |
-| `name`        | Optional custom tunnel name. A human-readable name is auto-generated if omitted. |
-| `--subdomain` | Request a custom subdomain (e.g. `--subdomain myapp`) |
+| Argument          | Description |
+|-------------------|-------------|
+| `address`         | Local port (e.g. `8080`) or `host:port` (e.g. `127.0.0.1:3000`) |
+| `name`            | Optional custom tunnel name. A human-readable name is auto-generated if omitted. |
+| `--s`, `--subdomain` | Request a custom subdomain (e.g. `--s myapp` or `--subdomain myapp`) |
 
 **Examples:**
 ```bash
 portx http 8080
 portx http localhost:3000 my-app
-portx http 8080 --subdomain demo
+portx http 8080 --s demo
+portx https 8080 --s demo
 ```
 
 **Output:**
@@ -177,33 +178,50 @@ portx http 8080 --subdomain demo
 
 ---
 
-### `portx tcp <address> [name]`
+### `portx tcp <address> [name] [--p <port>]`
 
-Create a TCP tunnel for non-HTTP services (SSH, game servers, databases, etc.).
+Create a TCP tunnel for non-HTTP services (SSH, game servers, databases, etc.). Supports optional custom public port via `--p` or `--port`.
 
+| Argument       | Description |
+|----------------|-------------|
+| `address`      | Local port (e.g. `25565`) or `host:port` (e.g. `192.168.0.9:25565`) |
+| `name`         | Optional custom tunnel name. |
+| `--p`, `--port` | Optional custom public port (1–65000, e.g. `--p 25565`). If omitted, an available port is automatically assigned. |
+
+**Examples:**
 ```bash
-portx tcp 25565              # Minecraft server
-portx tcp 22                 # SSH
-portx tcp 5432 postgres-dev  # PostgreSQL database
+portx tcp 25565                              # Random public port assigned
+portx tcp 192.168.0.9:25565 --p 25565        # Custom public port 25565
+portx tcp 22 --port 2222 ssh-server          # Custom public port 2222
+portx tcp 5432 postgres-dev                  # PostgreSQL database
 ```
 
 **Output:**
 ```
   Name:        calm-lion
-  Local:       127.0.0.1:25565
-  Public:      tcp.portx.infinitynoob.lol:30125
+  Local:       192.168.0.9:25565
+  Public:      tcp.portx.infinitynoob.lol:25565
 ```
 
 ---
 
-### `portx udp <address> [name]`
+### `portx udp <address> [name] [--p <port>]`
 
-Create a UDP tunnel for UDP services (game servers, VoIP, DNS, etc.).
+Create a UDP tunnel for UDP services (game servers, VoIP, DNS, etc.). Supports optional custom public port via `--p` or `--port`.
 
+| Argument       | Description |
+|----------------|-------------|
+| `address`      | Local port (e.g. `19132`) or `host:port` (e.g. `192.168.0.9:19132`) |
+| `name`         | Optional custom tunnel name. |
+| `--p`, `--port` | Optional custom public port (1–65000, e.g. `--p 19132`). If omitted, an available port is automatically assigned. |
+
+**Examples:**
 ```bash
-portx udp 7777               # Terraria / game server
-portx udp 19132 bedrock      # Minecraft Bedrock
+portx udp 7777                               # Terraria server (random port)
+portx udp 192.168.0.9:19132 --p 19132 bedrock # Minecraft Bedrock with custom port 19132
 ```
+
+> **Note on Protocol Independence:** TCP and UDP ports are managed independently. You can have both `portx tcp ... --p 25565` and `portx udp ... --p 25565` running concurrently without conflict.
 
 ---
 
@@ -314,8 +332,21 @@ Interactively edit a tunnel's configuration.
 portx edit swift-falcon
 ```
 
-- Opens the tunnel's generated TOML configuration in your preferred editor (`$EDITOR`, defaults to `nano`).
-- Reads changes upon exit, automatically updates the persistent state (such as modified `localPort` or `localIp`), and triggers a graceful reload if the tunnel is currently running.
+- Opens the tunnel's configuration in your preferred editor (`$EDITOR`, defaults to `nano`).
+- For TCP and UDP tunnels, `remotePort` is visible and directly editable:
+  ```toml
+  name = "bedrock"
+  type = "udp"
+  local_ip = "192.168.0.9"
+  local_port = 19132
+  remotePort = 19132
+  ```
+- **Validation & Safety:**
+  - Validates that `remotePort` is between 1 and 65000.
+  - Checks for local port conflicts across your existing tunnels of the same protocol.
+  - Re-allocates the port on the server before making changes.
+  - If the new port is invalid or already in use, the existing running tunnel is **never destroyed or interrupted**, and your previous configuration is preserved.
+  - If valid, the tunnel is automatically stopped, reconfigured, restarted with the new port, and the new public address is displayed.
 
 ---
 
@@ -608,7 +639,8 @@ Base URL: `http://portx.infinitynoob.lol:8765`
 
 ### `POST /api/v1/tunnel` — Request new allocation
 **Headers:** `Authorization: Bearer <token>`  
-**Body:** `{"type": "http"|"tcp"|"udp", "local_host": "127.0.0.1", "local_port": 8080, "subdomain": "optional"}`  
+**Body:** `{"type": "http"|"tcp"|"udp", "local_host": "127.0.0.1", "local_port": 8080, "subdomain": "optional", "remote_port": 25565}`  
+*Note:* `remote_port` is optional and only applies to `tcp` and `udp` tunnels. Allowed range is 1–65000 (critical system ports such as 22, 80, 443, 7000, 8765 on TCP are protected).
 **Response (200):**
 ```json
 {

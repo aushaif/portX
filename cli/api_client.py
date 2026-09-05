@@ -106,6 +106,7 @@ def request_tunnel(
     local_host: str,
     local_port: int,
     subdomain: str | None = None,
+    remote_port: int | None = None,
 ) -> dict:
     """
     Ask the PortX server to allocate a new tunnel.
@@ -119,6 +120,8 @@ def request_tunnel(
     }
     if subdomain:
         body["subdomain"] = subdomain
+    if remote_port:
+        body["remote_port"] = remote_port
 
     result = _request("POST", "/api/v1/tunnel", body)
     if not result:

@@ -94,6 +94,10 @@ TCP_PORT_MAX = int(os.environ.get("PORTX_TCP_PORT_MAX", "31999"))
 UDP_PORT_MIN = int(os.environ.get("PORTX_UDP_PORT_MIN", "32000"))
 UDP_PORT_MAX = int(os.environ.get("PORTX_UDP_PORT_MAX", "33999"))
 
+CUSTOM_PORT_MIN = int(os.environ.get("PORTX_CUSTOM_PORT_MIN", "1"))
+CUSTOM_PORT_MAX = int(os.environ.get("PORTX_CUSTOM_PORT_MAX", "65000"))
+RESERVED_TCP_PORTS = {22, 80, 443, FRPS_PORT, int(os.environ.get("PORTX_API_PORT", "8765"))}
+
 # Path for persistent allocation state — survives server restarts
 STATE_FILE = Path(os.environ.get("PORTX_STATE_FILE", "/opt/portx/state.json"))
 
@@ -260,11 +264,20 @@ class TunnelAllocator:
 
     # ── TCP ──────────────────────────────────────────────────────────────
 
-    def allocate_tcp(self, local_host: str, local_port: int) -> dict:
+    def allocate_tcp(self, local_host: str, local_port: int, req_port: int | None = None) -> dict:
         with self._lock:
-            port = self._new_port(self._used_tcp_ports, TCP_PORT_MIN, TCP_PORT_MAX)
-            if port is None:
-                raise RuntimeError("No TCP ports available. Try again later.")
+            if req_port is not None:
+                if not isinstance(req_port, int) or not (CUSTOM_PORT_MIN <= req_port <= CUSTOM_PORT_MAX):
+                    raise RuntimeError(f"Invalid remote_port: {req_port}. Must be between {CUSTOM_PORT_MIN} and {CUSTOM_PORT_MAX}.")
+                if req_port in RESERVED_TCP_PORTS:
+                    raise RuntimeError(f"TCP port {req_port} is reserved for system services.")
+                if req_port in self._used_tcp_ports:
+                    raise RuntimeError(f"TCP port {req_port} is already in use.")
+                port = req_port
+            else:
+                port = self._new_port(self._used_tcp_ports, TCP_PORT_MIN, TCP_PORT_MAX)
+                if port is None:
+                    raise RuntimeError("No TCP ports available. Try again later.")
 
             proxy_name = f"portx-tcp-{port}"
             tunnel_id  = str(uuid.uuid4())
@@ -295,11 +308,18 @@ class TunnelAllocator:
 
     # ── UDP ──────────────────────────────────────────────────────────────
 
-    def allocate_udp(self, local_host: str, local_port: int) -> dict:
+    def allocate_udp(self, local_host: str, local_port: int, req_port: int | None = None) -> dict:
         with self._lock:
-            port = self._new_port(self._used_udp_ports, UDP_PORT_MIN, UDP_PORT_MAX)
-            if port is None:
-                raise RuntimeError("No UDP ports available. Try again later.")
+            if req_port is not None:
+                if not isinstance(req_port, int) or not (CUSTOM_PORT_MIN <= req_port <= CUSTOM_PORT_MAX):
+                    raise RuntimeError(f"Invalid remote_port: {req_port}. Must be between {CUSTOM_PORT_MIN} and {CUSTOM_PORT_MAX}.")
+                if req_port in self._used_udp_ports:
+                    raise RuntimeError(f"UDP port {req_port} is already in use.")
+                port = req_port
+            else:
+                port = self._new_port(self._used_udp_ports, UDP_PORT_MIN, UDP_PORT_MAX)
+                if port is None:
+                    raise RuntimeError("No UDP ports available. Try again later.")
 
             proxy_name = f"portx-udp-{port}"
             tunnel_id  = str(uuid.uuid4())
@@ -571,6 +591,16 @@ class PortXHandler(BaseHTTPRequestHandler):
         local_host  = body.get("local_host", "127.0.0.1")
         local_port  = body.get("local_port")
         req_sub     = body.get("subdomain")
+        req_port    = body.get("remote_port")
+        if req_port is not None:
+            try:
+                req_port = int(req_port)
+            except (ValueError, TypeError):
+                self._send_json(400, {"error": f"Invalid remote_port: {req_port!r}"})
+                return
+            if not (CUSTOM_PORT_MIN <= req_port <= CUSTOM_PORT_MAX):
+                self._send_json(400, {"error": f"Invalid remote_port: {req_port}. Must be between {CUSTOM_PORT_MIN} and {CUSTOM_PORT_MAX}."})
+                return
 
         if tunnel_type not in ("http", "tcp", "udp"):
             self._send_json(400, {"error": f"Invalid tunnel type: '{tunnel_type}'"})
@@ -584,9 +614,9 @@ class PortXHandler(BaseHTTPRequestHandler):
             if tunnel_type == "http":
                 info = _allocator.allocate_http(local_host, local_port, req_sub)
             elif tunnel_type == "tcp":
-                info = _allocator.allocate_tcp(local_host, local_port)
+                info = _allocator.allocate_tcp(local_host, local_port, req_port)
             else:
-                info = _allocator.allocate_udp(local_host, local_port)
+                info = _allocator.allocate_udp(local_host, local_port, req_port)
         except RuntimeError as exc:
             self._send_json(503, {"error": str(exc)})
             return

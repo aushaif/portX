@@ -62,11 +62,14 @@ portx api <your-token>
 ### Create tunnels
 
 ```bash
-portx http 8080                      # HTTP tunnel to local port 8080
-portx http 8080 my-app               # Named HTTP tunnel
-portx http 8080 --subdomain test     # HTTP tunnel on test.infinitynoob.lol
-portx tcp 25565                      # TCP tunnel
-portx udp 7777                       # UDP tunnel
+portx http 8080                           # HTTP tunnel to local port 8080
+portx http 8080 my-app                    # Named HTTP tunnel
+portx http 8080 --s test                  # HTTP tunnel on test.infinitynoob.lol (--s or --subdomain)
+portx https 8080 --s test                 # HTTPS tunnel on test.infinitynoob.lol
+portx tcp 25565                           # TCP tunnel (random public port assigned)
+portx tcp 192.168.0.9:25565 --p 25565    # TCP tunnel with custom public port (1-65000, --p or --port)
+portx udp 7777                            # UDP tunnel (random public port assigned)
+portx udp 192.168.0.9:19132 --p 19132    # UDP tunnel with custom public port (1-65000, --p or --port)
 ```
 
 ### Manage tunnels

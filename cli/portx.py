@@ -56,6 +56,7 @@ def _start_tunnel(
     local_addr_str: str,
     name: str | None,
     subdomain: str | None = None,
+    public_port: int | None = None,
     auto_start: bool = False,
 ) -> None:
     _hdr()
@@ -70,7 +71,18 @@ def _start_tunnel(
     if name in tunnels and tunnels[name].get("status") in ("starting", "running"):
         _err(f"Tunnel '{name}' is already running. Stop it first.")
 
-    # 2. Parse address
+    # 2. Port validation & conflict check (for custom TCP/UDP ports)
+    if public_port is not None:
+        if not (1 <= public_port <= 65000):
+            _err(f"Invalid public port: {public_port} — must be between 1 and 65000.")
+        for t_name, t_data in tunnels.items():
+            if t_data.get("type") == tunnel_type and t_data.get("remote_port") == public_port:
+                _err(
+                    f"Public port {public_port} is already used by {tunnel_type.upper()} tunnel '{t_name}'.\n"
+                    f"  Choose a different port or stop/remove '{t_name}' first."
+                )
+
+    # 3. Parse address
     try:
         local_host, local_port = _address.parse_local_address(local_addr_str)
     except _address.AddressError as exc:
@@ -78,10 +90,13 @@ def _start_tunnel(
 
     display_local = _address.format_local(local_host, local_port)
 
-    # 3. Request tunnel from server
+    # 4. Request tunnel from server
     print(f"  → Requesting {tunnel_type.upper()} tunnel...")
     try:
-        info = _api.request_tunnel(tunnel_type, local_host, local_port, subdomain)
+        info = _api.request_tunnel(
+            tunnel_type, local_host, local_port,
+            subdomain=subdomain, remote_port=public_port,
+        )
     except _api.APIError as exc:
         _err(str(exc))
 
@@ -180,6 +195,7 @@ def main() -> None:
         print("    portx <command> [options]\n")
         print("  Commands:")
         print("    http        Create an HTTP tunnel")
+        print("    https       Create an HTTPS tunnel")
         print("    tcp         Create a TCP tunnel")
         print("    udp         Create a UDP tunnel")
         print("    list        List all tunnels")
@@ -214,7 +230,16 @@ def main() -> None:
     )
     p_http.add_argument("local_address", help="Port or host:port (e.g., 8080 or 127.0.0.1:8080)")
     p_http.add_argument("name", nargs="?", help="Optional custom tunnel name. If omitted, one is generated.")
-    p_http.add_argument("--subdomain", help="Request a specific subdomain (e.g., 'noob')")
+    p_http.add_argument("-s", "--s", "--subdomain", dest="subdomain", help="Request a specific subdomain (e.g., 'noob')")
+
+    # --- HTTPS ---
+    p_https = subparsers.add_parser(
+        "https", help="Create an HTTPS tunnel",
+        description="Creates a persistent background HTTPS tunnel exposing your local server.",
+    )
+    p_https.add_argument("local_address", help="Port or host:port (e.g., 8080 or 127.0.0.1:8080)")
+    p_https.add_argument("name", nargs="?", help="Optional custom tunnel name. If omitted, one is generated.")
+    p_https.add_argument("-s", "--s", "--subdomain", dest="subdomain", help="Request a specific subdomain (e.g., 'noob')")
 
     # --- TCP ---
     p_tcp = subparsers.add_parser(
@@ -223,6 +248,7 @@ def main() -> None:
     )
     p_tcp.add_argument("local_address", help="Port or host:port")
     p_tcp.add_argument("name", nargs="?", help="Optional custom tunnel name")
+    p_tcp.add_argument("-p", "--p", "--port", dest="public_port", type=int, help="Optional custom public port (1-65000, e.g., 25565)")
 
     # --- UDP ---
     p_udp = subparsers.add_parser(
@@ -231,6 +257,7 @@ def main() -> None:
     )
     p_udp.add_argument("local_address", help="Port or host:port")
     p_udp.add_argument("name", nargs="?", help="Optional custom tunnel name")
+    p_udp.add_argument("-p", "--p", "--port", dest="public_port", type=int, help="Optional custom public port (1-65000, e.g., 19132)")
 
     # --- LIST ---
     subparsers.add_parser("list", help="List all tunnels",
@@ -350,12 +377,12 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        if args.command == "http":
+        if args.command in ("http", "https"):
             _start_tunnel("http", args.local_address, args.name, args.subdomain)
         elif args.command == "tcp":
-            _start_tunnel("tcp", args.local_address, args.name)
+            _start_tunnel("tcp", args.local_address, args.name, public_port=getattr(args, "public_port", None))
         elif args.command == "udp":
-            _start_tunnel("udp", args.local_address, args.name)
+            _start_tunnel("udp", args.local_address, args.name, public_port=getattr(args, "public_port", None))
         elif args.command == "list":
             _cmds.cmd_list()
         elif args.command == "info":
