@@ -63,9 +63,6 @@ import state as _state
 _INITIAL_BACKOFF    = 2      # seconds
 _MAX_BACKOFF        = 120    # seconds
 _HEARTBEAT_INTERVAL = 60     # seconds between heartbeats
-# Force a graceful frpc reload after this many seconds even if frpc looks
-# healthy.  Breaks any long-lived zombie before users notice (~12 h).
-_MAX_CONNECTION_AGE = 43_200  # 12 hours
 
 # frpc log markers that signal a fatal configuration problem
 _FATAL_MARKERS = (
@@ -450,7 +447,6 @@ def main() -> None:
         # ── Monitor frpc ───────────────────────────────────────────────────
         conn_lost_event = threading.Event()
         drain_thread = _start_stdout_drainer(_proc, conn_lost_event)
-        conn_start = time.monotonic()
 
         while not _shutdown_flag:
             ret = _proc.poll()
@@ -469,17 +465,6 @@ def main() -> None:
             # Live failure detected in frpc's own output — restart now
             if conn_lost_event.is_set():
                 _log("Live connection failure detected — restarting frpc...")
-                _kill_frpc()
-                break
-
-            # Max-age safeguard: force a reload before connection can zombie
-            age = time.monotonic() - conn_start
-            if age >= _MAX_CONNECTION_AGE:
-                _was_reload = True
-                _log(
-                    f"Max connection age ({_MAX_CONNECTION_AGE // 3600}h) reached — "
-                    "forcing graceful reload to prevent zombie connections..."
-                )
                 _kill_frpc()
                 break
 
