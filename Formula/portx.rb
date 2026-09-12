@@ -5,7 +5,7 @@ class Portx < Formula
   version "2.0.0"
   sha256 "" # Will be auto-calculated by Homebrew
 
-  depends_on "python@3.10"
+  depends_on "python@3.12"
 
   def install
     # 1. Install CLI modules to libexec

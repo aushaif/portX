@@ -24,14 +24,13 @@ This single command works for both **macOS** and **Linux**. It automatically:
 
 **Requirements:** Python 3.12+ (automatically installed by the script if missing)
 
-### Homebrew (macOS only)
+### Homebrew (macOS & Linux)
 
 ```bash
-brew tap aushaif/portx
-brew install portx
+brew install aushaif/portx/portx
 ```
 
-> **Note:** Use the tap `aushaif/portx` — there is an unrelated PortX.app in Homebrew's default casks.
+> **Note:** Installing directly via `aushaif/portx/portx` taps the repository and installs the CLI in a single step, avoiding any conflict with the unrelated PortX.app cask.
 
 ---
 
@@ -191,7 +190,7 @@ portx/
 │   ├── frps.toml                 # frps configuration
 │   └── setup.sh                  # One-command VPS setup
 ├── Formula/
-│   └── portx-cli.rb              # Homebrew formula
+│   └── portx.rb                  # Homebrew formula
 └── scripts/
     └── install.sh                 # macOS & Linux unified installer
 ```

@@ -1,434 +1,250 @@
-# PortX — Full Technical Documentation
+# PortX — Official Product & Technical Documentation
 
-> Version 2.2 | Last updated: September 2026
-
----
-
-## Table of Contents
-
-1. [What is PortX?](#1-what-is-portx)
-2. [Architecture Overview](#2-architecture-overview)
-3. [Installation](#3-installation)
-4. [First Run & Auth Setup](#4-first-run--auth-setup)
-5. [CLI Commands Reference](#5-cli-commands-reference)
-6. [Configuration Files & State](#6-configuration-files--state)
-7. [How Tunnels & Reconnection Work](#7-how-tunnels--reconnection-work)
-8. [Project File Structure](#8-project-file-structure)
-9. [Module Reference (CLI)](#9-module-reference-cli)
-10. [Server Reference](#10-server-reference)
-11. [Server API Reference](#11-server-api-reference)
-12. [VPS Deployment](#12-vps-deployment)
-13. [Supported Platforms](#13-supported-platforms)
-14. [Troubleshooting](#14-troubleshooting)
+> **Website Content & AI Generation Reference**  
+> Everything required to generate the public website, documentation portal, landing page copy, interactive CLI demos, and API reference for PortX.
 
 ---
 
-## 1. What is PortX?
+## 1. Brand & Value Proposition
 
-PortX is a command-line tool that exposes your **local ports to the internet** using secure, high-reliability tunnels. It is a user-friendly wrapper around [FRP (Fast Reverse Proxy)](https://github.com/fatedier/frp), a high-performance open-source reverse proxy.
+### Product Identity
+- **Name:** PortX
+- **Tagline:** Fast, rock-solid tunnels from localhost to the internet.
+- **Short Subtitle:** Expose your local web apps, game servers, databases, and services to the public internet with a single command. Zero config, background daemons, and unbreakable uptime.
+- **Key Promise:** **Tunnels stay alive.** While traditional tunneling tools drop after hours or days due to silent NAT expirations and idle timeouts, PortX uses active TCP-level keepalives and 90-second heartbeat failure detection to run indefinitely without manual reloads.
 
-**Key features:**
-- One command to create persistent HTTP, TCP, or UDP tunnels
-- Tunnels run as **background daemons** — no active terminal window required
-- **Active Keepalives:** TCP-level and application-level heartbeats (every 30 s) prevent NAT/firewall tables from silently expiring idle connections
-- **Fast Dead-Connection Detection:** If the server stops responding, frpc detects it within 90 seconds and automatically reconnects — no silent zombie connections
-- **Auto-Reconnection & Recovery:** Automatic exponential backoff reconnects if network drops, server restarts, or frpc crashes
-- **Indefinite Uptime:** Tunnels stay connected continuously and only restart when an actual failure is detected — no arbitrary periodic refreshes
-- **Persistent Allocations:** Subdomains and TCP/UDP ports remain reserved across restarts and reboots
-- **Crash & Power-Failure Recovery:** System-level watchdog automatically restores tunnels on boot without manual login
-- **Graceful Zero-Downtime Reload:** Edit configurations and reload tunnels on the fly via `portx edit` and `portx reload`
-- **Concurrency & Process Safety:** Kernel-level file locking (`fcntl`) guarantees zero duplicate worker processes
-- **Server-side Stale Cleanup:** The server automatically releases allocations from tunnels that haven't sent a heartbeat in 10+ minutes, preventing port exhaustion
-- Auth token-based access control
-- Zero external Python dependencies (pure Python 3.12+ stdlib)
-
----
-
-## 2. Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│  Client Machine (macOS / Linux)                                         │
-│                                                                         │
-│   portx http 8080                                                       │
-│        │                                                                │
-│        ├─ cli/portx.py          (CLI entry & argument parsing)          │
-│        ├─ cli/commands.py       (CLI commands & process management)     │
-│        ├─ cli/api_client.py     (REST client with auth & reregister)    │
-│        ├─ cli/state.py          (tunnels.toml + fcntl lock management)  │
-│        ├─ cli/frp_config.py     (generates frpc TOML configs)           │
-│        ├─ cli/worker.py         (background daemon with auto-reconnect) │
-│        ├─ cli/watchdog.py       (boot-time monitor & restorer)          │
-│        └─ cli/launchd.py        (LaunchDaemon / systemd installer)      │
-│                   │                                                     │
-│              ~/.portx/bin/frpc  (FRP client binary)                     │
-└─────────────────────────┬───────────────────────────────────────────────┘
-                          │  frpc connects on port 7000
-                          ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│  VPS (portx.infinitynoob.lol)                                           │
-│                                                                         │
-│   frps (port 7000)        ← frpc tunnel connections                     │
-│   portx_server.py (8765)  ← PortX REST API (allocations & heartbeats)  │
-│   /opt/portx/state.json   ← Persistent allocation state & .bak backup   │
-│                                                                         │
-│   HTTP  → *.infinitynoob.lol        → frps → frpc → local port          │
-│   TCP   → tcp.portx.infinitynoob.lol:PORT → frps → frpc → local port    │
-│   UDP   → udp.portx.infinitynoob.lol:PORT → frps → frpc → local port    │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-Two server-side components run on the VPS:
-
-| Component         | Port | Role                                                 |
-|-------------------|------|------------------------------------------------------|
-| `frps`            | 7000 | FRP server — handles actual proxying of tunnel data  |
-| `portx_server.py` | 8765 | PortX API — persists allocations, auth, & heartbeat  |
+### Core Value Pillars (Website Feature Cards)
+1. **Unbreakable Reliability:**
+   Active TCP-level keepalives every 30 seconds prevent home routers and ISP firewalls from killing idle connections. If a network blip occurs, PortX detects it within 90 seconds and reconnects automatically with exponential backoff.
+2. **Background Daemons by Default:**
+   No need to keep terminal windows open or run screen/tmux. PortX detaches tunnels into lightweight system daemons managed cleanly via the CLI.
+3. **Multi-Protocol Support (HTTP, TCP, UDP):**
+   Expose anything: web applications (HTTP/HTTPS with automatic SSL), game servers like Minecraft Java/Bedrock (TCP/UDP), SSH servers, databases (Postgres/MySQL), and VoIP.
+4. **Boot-Time Auto-Recovery:**
+   Enable the native system watchdog (`portx watchdog install`) to automatically restore all your active tunnels upon system boot or power failure — before user login.
+5. **Zero-Downtime Hot Reloads:**
+   Update tunnel parameters or switch ports interactively (`portx edit` and `portx reload`) without losing your reserved public URL or dropping healthy connections.
+6. **Zero External Python Dependencies:**
+   Built purely on Python 3.12+ standard library with official FRP (Fast Reverse Proxy) binaries downloaded directly from GitHub Releases.
 
 ---
 
-## 3. Installation
+## 2. Quickstart & Installation
 
-### Quick Install (macOS & Linux)
+### Option A: Universal Installer (Recommended)
+One command for **macOS** and **Linux** (automatically configures Python 3.12+ and installs FRP):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install.sh | bash
 ```
 
-- **macOS:** Auto-installs Python 3.12+ via Homebrew if not present.
-- **Linux:** Auto-installs Python 3.12+ via the system package manager (`apt-get`, `dnf`, `yum`, `pacman`, or `zypper`).
-
-### Homebrew (macOS only)
+### Option B: Homebrew (macOS & Linux)
+One-command installation via custom tap:
 
 ```bash
-brew tap aushaif/portx
-brew install portx
+brew install aushaif/portx/portx
 ```
 
-> **Note:** Always use the tap `aushaif/portx` — there is an unrelated PortX.app in Homebrew's default casks.
-
-### What the installer does
-
-1. Detects OS and CPU architecture (Apple Silicon ARM64, Intel AMD64, Linux ARM64/AMD64).
-2. Checks for Python 3.12+ and installs/upgrades automatically if needed.
-3. Downloads the PortX CLI source code from GitHub.
-4. Installs CLI modules to `~/.local/lib/portx/`.
-5. Creates an executable binary wrapper at `~/.local/bin/portx`.
-6. Downloads the official matching `frpc` binary from FRP GitHub Releases.
-7. Installs `frpc` to `~/.portx/bin/frpc`.
-8. Initializes runtime directories: `~/.portx/tunnels/`, `~/.portx/logs/`, `~/.portx/locks/`.
-9. Adds `~/.local/bin` to `PATH` in your shell profile (`~/.zshrc`, `~/.bashrc`, etc.).
-10. Guides you through first-time auth token setup.
-
----
-
-## 4. First Run & Auth Setup
-
-On first use, PortX checks `~/.portx/config.toml` for an auth token. If missing, you will be prompted:
-
-```
-  PortX — First Time Setup
-  ─────────────────────────────────────────
-
-  No auth token found. Please enter your PortX auth token.
-  You can find your token at: https://portx.infinitynoob.lol/dashboard
-
-  Auth token: ••••••••••••••••••••••
-
-  ✓ Auth token saved to ~/.portx/config.toml
-```
-
-The token is securely saved and reused automatically. You can update it anytime:
+### First-Time Authentication Setup
+On first execution, PortX prompts for your auth token, saving it to `~/.portx/config.toml`:
 
 ```bash
-portx api <your-token>
+portx api <your-auth-token>
 ```
 
 ---
 
-## 5. CLI Commands Reference
+## 3. How It Works (Visual Architecture)
 
-### `portx http <address> [name] [--s <sub>]` / `portx https <address> [name] [--s <sub>]`
+```
+┌────────────────────────────────────────────────────────────┐
+│                    Your Local Machine                      │
+│                                                            │
+│   Web App (8080)   /   Minecraft (25565)   /   SSH (22)    │
+│                           ▲                                │
+│                           │ local forward                  │
+│                     FRP Client (frpc)                      │
+│                (Managed by PortX Daemon)                   │
+└───────────────────────────┬────────────────────────────────┘
+                            │ Encrypted FRP Tunnel (Port 7000)
+                            │ + TCP Keepalives (Every 30s)
+                            │ + Heartbeat Probes (Every 30s)
+                            ▼
+┌────────────────────────────────────────────────────────────┐
+│                 PortX Cloud Gateway (VPS)                  │
+│                                                            │
+│   HTTP/HTTPS: https://<subdomain>.infinitynoob.lol         │
+│   TCP:        tcp.portx.infinitynoob.lol:<port>            │
+│   UDP:        udp.portx.infinitynoob.lol:<port>            │
+└────────────────────────────────────────────────────────────┘
+```
 
-Create an HTTP or HTTPS tunnel exposing your local web server.
+### What happens when you run `portx http 8080`:
+1. PortX talks to the PortX API, reserves a secure subdomain, and fetches proxy credentials.
+2. Generates an optimized FRP client configuration equipped with 30s keepalives and 90s dead-connection timeouts.
+3. Spawns an isolated, locked background daemon that launches the high-performance FRP client.
+4. Returns your live HTTPS public address in seconds.
 
-| Argument          | Description |
-|-------------------|-------------|
-| `address`         | Local port (e.g. `8080`) or `host:port` (e.g. `127.0.0.1:3000`) |
-| `name`            | Optional custom tunnel name. A human-readable name is auto-generated if omitted. |
-| `--s`, `--subdomain` | Request a custom subdomain (e.g. `--s myapp` or `--subdomain myapp`) |
+---
 
-**Examples:**
+## 4. Connection Reliability Engine: Why PortX Never Drops
+
+Most developers experience tunnels dropping after 1 to 5 days because routers, firewalls, and NAT gateways silently discard idle TCP sessions from their routing tables without sending a TCP RST packet (creating "zombie" tunnels). PortX eliminates this with a 6-layer reliability engine:
+
+| Layer | Mechanism | How It Works |
+|:------|:----------|:-------------|
+| **1. TCP Mux Keepalive** | `tcpMuxKeepaliveInterval = 30s` | Sends keepalive frames at the transport layer every 30 seconds. Keeps router NAT states active indefinitely. |
+| **2. Heartbeat Probes** | `heartbeatInterval = 30s` | Actively pings the remote server every 30 seconds to verify bidirectional data transfer. |
+| **3. Dead-Connection Detection** | `heartbeatTimeout = 90s` | If no heartbeat response is received within 90 seconds, the client self-terminates immediately. |
+| **4. Live Log Monitoring** | Real-time stream inspection | The background worker daemon scans frpc output for error signatures (e.g. `heartbeat timeout`, `connection closed`, `i/o timeout`) and immediately triggers reconnect. |
+| **5. Exponential Auto-Reconnect** | Backoff loop (2s → 120s max) | Reconnects automatically when internet drops or server reboots. Uses the `reregister` API to reclaim the exact same URL/port. |
+| **6. Server Stale Tunnel Reaper** | 5-min cleanup cycle | The server frees abandoned tunnels after 10 minutes of inactivity, ensuring reconnecting clients never hit port collisions. |
+
+---
+
+## 5. CLI Command Reference
+
+### `portx http` / `portx https`
+Expose a local web server via public HTTPS.
+
 ```bash
+# Basic usage
 portx http 8080
-portx http localhost:3000 my-app
-portx http 8080 --s demo
-portx https 8080 --s demo
+
+# Specify host and port with custom name
+portx http 127.0.0.1:3000 my-portfolio
+
+# Request a custom subdomain
+portx http 8080 --s preview
+# Output: https://preview.infinitynoob.lol
 ```
 
-**Output:**
-```
-  ✓ Tunnel active
+### `portx tcp`
+Expose any TCP service (Minecraft, SSH, PostgreSQL, Redis, custom TCP sockets).
 
-  Name:        swift-falcon
-  Local:       127.0.0.1:8080
-  Public:      https://x7k29m.infinitynoob.lol
-
-  ✓ Running in background
-
-  Tip: Run 'sudo portx watchdog install' if you haven't already,
-       to enable boot-time auto-start for all tunnels.
-```
-
----
-
-### `portx tcp <address> [name] [--p <port>]`
-
-Create a TCP tunnel for non-HTTP services (SSH, game servers, databases, etc.). Supports optional custom public port via `--p` or `--port`.
-
-| Argument       | Description |
-|----------------|-------------|
-| `address`      | Local port (e.g. `25565`) or `host:port` (e.g. `192.168.0.9:25565`) |
-| `name`         | Optional custom tunnel name. |
-| `--p`, `--port` | Optional custom public port (1–65000, e.g. `--p 25565`). If omitted, an available port is automatically assigned. |
-
-**Examples:**
 ```bash
-portx tcp 25565                              # Random public port assigned
-portx tcp 192.168.0.9:25565 --p 25565        # Custom public port 25565
-portx tcp 22 --port 2222 ssh-server          # Custom public port 2222
-portx tcp 5432 postgres-dev                  # PostgreSQL database
+# Expose local Minecraft Java server (assigns random public port)
+portx tcp 25565
+
+# Expose with a specific custom public port (e.g. 25565)
+portx tcp 25565 minecraft --p 25565
+# Output: tcp.portx.infinitynoob.lol:25565
+
+# Forward local SSH server
+portx tcp 22 my-mac-ssh --p 2222
 ```
 
-**Output:**
-```
-  Name:        calm-lion
-  Local:       192.168.0.9:25565
-  Public:      tcp.portx.infinitynoob.lol:25565
-```
+### `portx udp`
+Expose UDP-based protocols (Minecraft Bedrock, gaming servers, DNS, VoIP).
 
----
-
-### `portx udp <address> [name] [--p <port>]`
-
-Create a UDP tunnel for UDP services (game servers, VoIP, DNS, etc.). Supports optional custom public port via `--p` or `--port`.
-
-| Argument       | Description |
-|----------------|-------------|
-| `address`      | Local port (e.g. `19132`) or `host:port` (e.g. `192.168.0.9:19132`) |
-| `name`         | Optional custom tunnel name. |
-| `--p`, `--port` | Optional custom public port (1–65000, e.g. `--p 19132`). If omitted, an available port is automatically assigned. |
-
-**Examples:**
 ```bash
-portx udp 7777                               # Terraria server (random port)
-portx udp 192.168.0.9:19132 --p 19132 bedrock # Minecraft Bedrock with custom port 19132
+# Expose Minecraft Bedrock on default port 19132
+portx udp 19132 bedrock --p 19132
+# Output: udp.portx.infinitynoob.lol:19132
 ```
-
-> **Note on Protocol Independence:** TCP and UDP ports are managed independently. You can have both `portx tcp ... --p 25565` and `portx udp ... --p 25565` running concurrently without conflict.
-
----
 
 ### `portx list`
-
-List all saved tunnels, their endpoints, and current running status.
+View all tunnels, their protocols, local targets, public endpoints, and real-time status.
 
 ```bash
 portx list
 ```
 
 **Output:**
-```
-  PORTX TUNNELS
+```text
+PORTX TUNNELS
 
-  NAME            TYPE   LOCAL                PUBLIC                                   STATUS
-  ─────────────────────────────────────────────────────────────────────────────────────────────
-  swift-falcon    HTTP   127.0.0.1:8080       https://x7k29m.infinitynoob.lol          RUNNING
-  calm-lion       TCP    127.0.0.1:25565      tcp.portx.infinitynoob.lol:30125          STOPPED
+NAME            TYPE   LOCAL             PUBLIC                                STATUS
+──────────────────────────────────────────────────────────────────────────────────────────
+my-portfolio    HTTP   127.0.0.1:3000    https://preview.infinitynoob.lol      RUNNING
+minecraft       TCP    127.0.0.1:25565   tcp.portx.infinitynoob.lol:25565      RUNNING
+bedrock         UDP    127.0.0.1:19132   udp.portx.infinitynoob.lol:19132      RUNNING
 ```
-
----
 
 ### `portx info <name>`
-
-Show detailed diagnostics, process ID, config paths, and error history for a tunnel.
-
-```bash
-portx info swift-falcon
-```
-
-**Output:**
-```
-  Name:        swift-falcon
-  ID:          3f2a1c8d-98e2-4f1b-87cf-1e827b5f10ad
-  Type:        HTTP
-  Local:       127.0.0.1:8080
-  Public:      https://x7k29m.infinitynoob.lol
-  Status:      RUNNING
-  PID:         12345
-  Config:      /Users/you/.portx/tunnels/swift-falcon.toml
-  Log:         /Users/you/.portx/logs/swift-falcon.log
-```
-
----
-
-### `portx start <name>` and `portx start --all`
-
-Start a stopped tunnel or all saved stopped tunnels.
+Detailed diagnostic view for a specific tunnel: PID, log path, config path, uptime, and last errors.
 
 ```bash
-portx start swift-falcon     # Start a specific tunnel
-portx start --all            # Start all stopped tunnels
+portx info my-portfolio
 ```
 
-- Skips already-running tunnels safely with kernel-level duplicate worker prevention.
-- Clears administrative stop flags so the watchdog can resume monitoring.
-
----
-
-### `portx stop <name>` and `portx stop --all`
-
-Gracefully stop a running tunnel or all active tunnels.
+### `portx stop <name>` / `portx stop --all`
+Gracefully halt tunnels without releasing public URLs or ports. Allows you to resume later with the identical address.
 
 ```bash
-portx stop swift-falcon
+portx stop my-portfolio
 portx stop --all
 ```
 
-- Terminates the worker and `frpc` processes cleanly.
-- **Preserves URL/port allocation:** Keeps the public address reserved so restarting gives you the exact same URL/port.
-- Marks tunnels as `admin_stopped=1` so the background watchdog will not automatically restart them.
+### `portx start <name>` / `portx start --all`
+Resume previously stopped tunnels.
 
----
+```bash
+portx start my-portfolio
+portx start --all
+```
 
 ### `portx restart <name>`
-
-Restart a running or stopped tunnel.
+Restart a running tunnel's worker and frpc processes cleanly.
 
 ```bash
-portx restart swift-falcon
+portx restart my-portfolio
 ```
-
-- Gracefully restarts the worker and re-attaches to the existing reserved public address.
-
----
 
 ### `portx reload [name]`
-
-Gracefully reload tunnel configuration without stopping healthy client sessions.
+Hot-reload tunnel configuration on the fly with zero backoff (~1-2s reconnect).
 
 ```bash
-portx reload                 # Reload all active tunnels
-portx reload swift-falcon    # Reload specific tunnel
+portx reload my-portfolio
 ```
-
-- Sends `SIGUSR1` to the worker process.
-- Performs an **instant zero-backoff reload** of `frpc` with updated configs, reconnecting within ~1-2 seconds.
-- Preserves the existing proxy name, subdomain, and remote port.
-
----
 
 ### `portx edit <name>`
-
-Interactively edit a tunnel's configuration.
+Interactive in-terminal configuration editor. Safely modifies ports or parameters with validation before applying changes.
 
 ```bash
-portx edit swift-falcon
+portx edit minecraft
 ```
 
-- Opens the tunnel's configuration in your preferred editor (`$EDITOR`, defaults to `nano`).
-- For TCP and UDP tunnels, `remotePort` is visible and directly editable:
-  ```toml
-  name = "bedrock"
-  type = "udp"
-  local_ip = "192.168.0.9"
-  local_port = 19132
-  remotePort = 19132
-  ```
-- **Validation & Safety:**
-  - Validates that `remotePort` is between 1 and 65000.
-  - Checks for local port conflicts across your existing tunnels of the same protocol.
-  - Re-allocates the port on the server before making changes.
-  - If the new port is invalid or already in use, the existing running tunnel is **never destroyed or interrupted**, and your previous configuration is preserved.
-  - If valid, the tunnel is automatically stopped, reconfigured, restarted with the new port, and the new public address is displayed.
-
----
-
-### `portx remove <name>` and `portx remove --all`
-
-Permanently remove a tunnel and release its URL/port allocation on the server.
+### `portx remove <name>` / `portx remove --all`
+Permanently delete a tunnel, release its remote port/subdomain back to the pool, and purge local logs.
 
 ```bash
-portx remove swift-falcon
+portx remove my-portfolio
 portx remove --all
 ```
 
-- Kills the worker and `frpc` processes.
-- Calls the server API to free the subdomain/port back to the public pool.
-- Deletes the local TOML config and log files.
-
----
-
 ### `portx status`
-
-Display overall system status, API connectivity, and watchdog state.
+Overall system health check showing API connectivity, active tunnel counts, and watchdog daemon status.
 
 ```bash
 portx status
 ```
 
-**Output:**
-```
-  PortX v2.1
-
-  Server:    Connected
-  API URL:   http://portx.infinitynoob.lol:8765
-  Tunnels:   1 running, 0 reconnecting, 1 stopped
-  Watchdog:  Running
-```
-
----
-
 ### `portx watchdog install | uninstall | status`
-
-Manage the boot-level background watchdog daemon.
-
-```bash
-sudo portx watchdog install    # Install system boot daemon
-sudo portx watchdog uninstall  # Remove system boot daemon
-portx watchdog status          # Check daemon health
-```
-
-- **macOS:** Installs a `LaunchDaemon` at `/Library/LaunchDaemons/lol.infinitynoob.portx.watchdog.plist` to run automatically at system boot before user login.
-- **Linux:** Installs a systemd unit at `/etc/systemd/system/portx-watchdog.service`.
-
----
-
-### `portx api <token>` and `portx api ls`
-
-Manage authentication credentials and API URL.
+Set up the operating system service (`LaunchDaemon` on macOS, `systemd` on Linux) to restore all active tunnels when your computer reboots.
 
 ```bash
-portx api hhoudcaddhaa798rtb3ryfwgsjsho   # Set new auth token
-portx api ls                             # Display active API URL and masked token
+sudo portx watchdog install
+sudo portx watchdog status
 ```
 
----
+### `portx api <token>` / `portx api ls`
+Configure or inspect your API authentication credentials.
+
+```bash
+portx api your-token-here
+portx api ls
+```
 
 ### `portx cleanup [--force]`
-
-Clean up orphaned configuration and log files.
+Remove leftover temporary logs and orphaned configs.
 
 ```bash
-portx cleanup              # Clean up orphaned files only
-portx cleanup --force      # Also remove stopped tunnel records and their files
+portx cleanup
 ```
 
----
-
 ### `portx uninstall`
-
-Completely removes PortX, its configuration, binaries, logs, daemons, and background processes.
+Completely remove PortX, background daemons, and binaries from your machine.
 
 ```bash
 portx uninstall
@@ -436,347 +252,138 @@ portx uninstall
 
 ---
 
-## 6. Configuration Files & State
+## 6. Popular Real-World Use Cases
 
-### 1. `~/.portx/config.toml` — Auth & API settings
+### 1. Webhooks & API Integration Testing (Stripe, GitHub, Shopify)
+Expose your local development server to test third-party webhooks without deploying to staging:
+```bash
+portx http 3000 --s stripe-hooks
+```
+Configure `https://stripe-hooks.infinitynoob.lol/api/webhooks` in your provider's dashboard.
 
-```toml
-[portx]
-api_url    = "http://portx.infinitynoob.lol:8765"
-auth_token = "your-auth-token-here"
+### 2. Minecraft Java & Bedrock Dedicated Servers
+Host multiplayer servers for your friends directly from your computer with static ports:
+```bash
+# Java Edition (TCP)
+portx tcp 25565 --p 25565 minecraft-java
+
+# Bedrock Edition (UDP)
+portx udp 19132 --p 19132 minecraft-bedrock
 ```
 
-### 2. `~/.portx/tunnels.toml` — Local tunnel database
-
-```toml
-[swift-falcon]
-type            = "http"
-local_host      = "127.0.0.1"
-local_port      = 8080
-public_url      = "https://x7k29m.infinitynoob.lol"
-status          = "running"
-pid             = 12345
-tunnel_id       = "3f2a1c8d-98e2-4f1b-87cf-1e827b5f10ad"
-proxy_name      = "portx-http-x7k29m"
-subdomain       = "x7k29m"
-remote_port     = 0
-auto_start      = 1
-admin_stopped   = 0
-frp_config_path = "/Users/you/.portx/tunnels/swift-falcon.toml"
-log_path        = "/Users/you/.portx/logs/swift-falcon.log"
-creation_time   = 1724686400.0
+### 3. Remote Access & SSH Forwarding
+Access your home machine or Raspberry Pi from anywhere in the world:
+```bash
+portx tcp 22 home-pi --p 22022
+# Connect from anywhere:
+# ssh -p 22022 user@tcp.portx.infinitynoob.lol
 ```
 
-- Protected by `fcntl.flock` at `~/.portx/.tunnels.lock` on all read-modify-write cycles.
-
-### 3. `~/.portx/locks/<name>.lock` — Kernel worker locks
-
-- Each active worker process acquires an exclusive `fcntl.flock` on this file for its entire lifetime.
-- Guarantees that only one worker/frpc instance can ever run per tunnel.
-
-### 4. `~/.portx/tunnels/<name>.toml` — FRP client configuration
-
-```toml
-serverAddr    = "portx.infinitynoob.lol"
-serverPort    = 7000
-auth.method   = "token"
-auth.token    = "<your-auth-token>"
-
-[transport]
-heartbeatInterval        = 30   # Probe server every 30 s
-heartbeatTimeout         = 90   # Reconnect if no reply within 90 s
-tcpMuxKeepaliveInterval  = 30   # TCP-level keepalive every 30 s (prevents NAT expiry)
-
-[log]
-level = "warn"
-
-[[proxies]]
-name      = "portx-http-x7k29m"
-type      = "http"
-localIP   = "127.0.0.1"
-localPort = 8080
-subdomain = "x7k29m"
-```
-
-The `[transport]` block is critical for long-running tunnels:
-- `heartbeatInterval` / `heartbeatTimeout`: frpc actively probes the frps server every 30 s. If no response is received for 90 s, the connection is declared dead and frpc reconnects automatically.
-- `tcpMuxKeepaliveInterval`: Sends TCP-level keep-alive packets to prevent home routers and ISP NAT tables from silently dropping idle connections (a common cause of zombie tunnels after several days).
-
----
-
-## 7. How Tunnels & Reconnection Work
-
-### Creation Flow (`portx http 8080`)
-
-```
-1. portx.py parses arguments and checks local address.
-2. api_client.py sends POST /api/v1/tunnel with auth token.
-3. portx_server.py allocates subdomain and returns connection parameters.
-4. frp_config.py writes ~/.portx/tunnels/<name>.toml with [transport] keepalive settings.
-5. state.py writes tunnel record to ~/.portx/tunnels.toml under fcntl lock.
-6. commands.py spawns worker.py in a detached session.
-7. worker.py acquires ~/.portx/locks/<name>.lock and starts frpc.
-8. worker.py starts a background heartbeat thread (PUT /api/v1/tunnel/<id>/heartbeat every 60s).
-9. Tunnel is live at https://<subdomain>.infinitynoob.lol.
-```
-
-### Connection Monitoring & Dead-Connection Detection
-
-While frpc is running, `worker.py` monitors it continuously:
-
-```
-- frpc sends TCP-level keepalive pings to frps every 30 s (tcpMuxKeepaliveInterval).
-- frpc probes the application-level heartbeat every 30 s (heartbeatInterval).
-- If no heartbeat reply is received within 90 s (heartbeatTimeout), frpc self-terminates.
-- worker.py also scans frpc's live log output for failure markers:
-    "heartbeat timeout", "connection is closed", "i/o timeout",
-    "read tcp", "write tcp", "proxy is not working", etc.
-- Upon detecting any of these, worker.py immediately kills frpc and begins reconnection.
-- Tunnels stay connected indefinitely — there are no periodic forced refreshes.
-  frpc is only restarted when an actual failure is detected.
-```
-
-### Auto-Reconnection & Conflict Recovery Flow
-
-If network is lost, the server restarts, or `frpc` drops:
-
-```
-1. frpc exits (either by self-terminating after heartbeat timeout, or due to a crash).
-2. worker.py detects exit and enters exponential backoff loop (2s → 4s → ... → 120s max).
-3. worker.py restarts frpc with the existing config.
-4. If frpc fails with proxy name/port conflict (e.g. server wiped state):
-   worker.py calls POST /api/v1/tunnel/<id>/reregister to reclaim the exact allocation.
-5. On reregister success, worker.py regenerates config and connects immediately.
-```
-
-### Boot & Power Failure Recovery Flow
-
-```
-1. Device boots or recovers from power failure.
-2. System LaunchDaemon (macOS) or systemd (Linux) starts watchdog.py before login.
-3. watchdog.py waits 8s for system network to settle.
-4. watchdog.py checks all tunnels in ~/.portx/tunnels.toml.
-5. For every tunnel where admin_stopped != 1 and worker lock is not held:
-   watchdog.py spawns worker.py, fully restoring all tunnels.
-```
-
-### Server-side Stale Tunnel Cleanup
-
-The server (`portx_server.py`) runs a background reaper thread:
-
-```
-- Every 5 minutes, the reaper scans all active tunnel allocations.
-- Any tunnel that has not sent a heartbeat for 10+ minutes is automatically released.
-  (Configurable via PORTX_STALE_TIMEOUT environment variable, default: 600 seconds.)
-- This ensures a reconnecting client can always re-register cleanly without port conflicts.
-- The stale timeout (10 min) is intentionally larger than the frpc heartbeat timeout (90 s)
-  to avoid false positives during brief network blips.
+### 4. Database Sharing & Client Demos
+Securely let team members access a local database or preview in-progress work:
+```bash
+portx tcp 5432 pg-dev
+portx http 8080 client-demo
 ```
 
 ---
 
-## 8. Project File Structure
+## 7. Developer REST API Reference
 
-```
-portx/
-│
-├── portx                         ← Dev entry point (./portx http 8080)
-│
-├── cli/                          ← Client-side application
-│   ├── portx.py                  # CLI entry point, argument parsing & dispatch
-│   ├── commands.py               # Command implementations & process manager
-│   ├── config.py                 # Configuration manager (~/.portx/config.toml)
-│   ├── api_client.py             # REST API client (allocations, reregister, heartbeat)
-│   ├── state.py                  # State manager (tunnels.toml + fcntl locking)
-│   ├── frp_config.py             # Generates frpc TOML configs
-│   ├── frp_runner.py             # Process launcher for frpc binary
-│   ├── worker.py                 # Background worker daemon (reconnect loop & signals)
-│   ├── watchdog.py               # Boot-time recovery daemon
-│   ├── launchd.py                # System LaunchDaemon / systemd installer
-│   └── address.py                # Parses local IP/port addresses
-│
-├── installer/
-│   └── portx_install.py          # Python installer (downloads CLI + FRP binaries)
-│
-├── server/                       ← VPS server-side code
-│   ├── portx_server.py           # PortX REST API server with state persistence
-│   ├── frps.toml                 # FRP server configuration
-│   └── setup.sh                  # One-command VPS setup script
-│
-├── Formula/
-│   └── portx.rb                  # Homebrew formula
-│
-├── scripts/
-│   └── install.sh                # macOS & Linux unified curl installer
-│
-├── README.md                     ← Quick start guide
-└── DOCUMENTATION.md              ← Comprehensive technical documentation
-```
+Base Endpoint: `http://portx.infinitynoob.lol:8765`  
+Header: `Authorization: Bearer <token>`
 
----
+### Endpoints Overview
 
-## 9. Module Reference (CLI)
+| Method | Route | Description |
+|:-------|:------|:------------|
+| `POST` | `/api/v1/tunnel` | Request a new tunnel allocation (subdomain / remote port) |
+| `POST` | `/api/v1/tunnel/<id>/reregister` | Reclaim an existing allocation during reconnection |
+| `PUT` | `/api/v1/tunnel/<id>/heartbeat` | Send liveness heartbeat (sent every 60s by worker) |
+| `GET` | `/api/v1/tunnel/<id>` | Inspect tunnel metadata and allocation details |
+| `DELETE` | `/api/v1/tunnel/<id>` | Release allocation back to public pool |
+| `GET` | `/health` | Server health check (`{"status": "ok"}`) |
 
-### `portx.py`
-CLI entry point. Configures `argparse` subparsers for `http`, `tcp`, `udp`, `list`, `info`, `start`, `stop`, `restart`, `reload`, `edit`, `remove`, `status`, `watchdog`, `api`, `cleanup`, and `uninstall`.
-
-### `commands.py`
-High-level command execution:
-- `cmd_start(name)` / `cmd_start_all()`: Starts stopped tunnels, preventing duplicates.
-- `cmd_stop(name)` / `cmd_stop_all()`: Stops tunnels, preserving URLs, sets `admin_stopped=1`.
-- `cmd_edit(name)`: Interactive editing via `$EDITOR`, parses TOML changes, and calls reload.
-- `cmd_reload(name)`: Sends `SIGUSR1` to workers for instant zero-backoff restart.
-- `cmd_restart(name)`: Kills worker and restarts it cleanly.
-- `cmd_watchdog_install()` / `cmd_watchdog_uninstall()` / `cmd_watchdog_status()`: Manages system service.
-
-### `worker.py`
-Detached daemon per active tunnel:
-- Acquires exclusive `fcntl` lock on `~/.portx/locks/<name>.lock`.
-- Exponential backoff reconnection loop (`2s` to `120s`).
-- Handles `SIGTERM`/`SIGINT` for clean termination.
-- Handles `SIGUSR1` for graceful reload (kills `frpc` and restarts immediately with zero backoff).
-- Conflict resolution via reregister API.
-- Heartbeat loop thread (`PUT /api/v1/tunnel/<id>/heartbeat` every 60s).
-- Monitors frpc's live stdout for failure log markers and triggers immediate reconnect.
-- **Indefinite runtime:** Tunnels stay connected until an actual failure is detected. There is no periodic forced restart.
-
-### `watchdog.py`
-System daemon running at boot:
-- Checks tunnels every 30s.
-- Auto-starts all unstopped tunnels (`admin_stopped=0`).
-- Validates liveness via `is_worker_locked(name)`.
-
-### `launchd.py`
-Cross-platform system daemon installer:
-- **macOS:** `/Library/LaunchDaemons/lol.infinitynoob.portx.watchdog.plist`
-- **Linux:** `/etc/systemd/system/portx-watchdog.service`
-- Configured to run as the invoking user (`UserName=<user>`, `HOME=<home>`).
-
-### `state.py`
-State persistence and file locking:
-- `_lock()`: Multi-process mutex using `fcntl.flock` on `~/.portx/.tunnels.lock`.
-- `acquire_worker_lock(name)` / `is_worker_locked(name)`: Kernel-level single worker guarantee.
-- Atomic file writes (`.tmp` → replace).
-
----
-
-## 10. Server Reference
-
-Runs on the VPS alongside `frps`.
-
-### `portx_server.py`
-Lightweight REST API server built with Python standard library (`http.server`).
-
-**Key features:**
-- **State Persistence:** Persists all allocations to `/opt/portx/state.json`.
-- **Automatic Backups:** Creates `/opt/portx/state.json.bak` on each save.
-- **Corruption Protection:** Automatically recovers from `.bak` if primary state is corrupt; aborts startup safely if both fail to prevent URL hijacking.
-- **Atomic Writes:** Saves state via temporary files to avoid partial write corruption.
-- **Tunnel Reclamation:** Supports `reregister` API allowing reconnecting clients to reclaim their exact URLs/ports.
-- **Stale Tunnel Reaper:** Background thread runs every 5 minutes and releases allocations from tunnels that have not sent a heartbeat in 10+ minutes (configurable via `PORTX_STALE_TIMEOUT` env var). Prevents port exhaustion from abandoned or crashed clients.
-
----
-
-## 11. Server API Reference
-
-Base URL: `http://portx.infinitynoob.lol:8765`
-
-### `POST /api/v1/tunnel` — Request new allocation
-**Headers:** `Authorization: Bearer <token>`  
-**Body:** `{"type": "http"|"tcp"|"udp", "local_host": "127.0.0.1", "local_port": 8080, "subdomain": "optional", "remote_port": 25565}`  
-*Note:* `remote_port` is optional and only applies to `tcp` and `udp` tunnels. Allowed range is 1–65000 (critical system ports such as 22, 80, 443, 7000, 8765 on TCP are protected).
-**Response (200):**
+### Allocation Request Example (`POST /api/v1/tunnel`)
 ```json
 {
-  "tunnel_id": "3f2a1c8d-98e2-4f1b-87cf-1e827b5f10ad",
   "type": "http",
-  "subdomain": "x7k29m",
-  "public_url": "https://x7k29m.infinitynoob.lol",
-  "proxy_name": "portx-http-x7k29m",
+  "local_host": "127.0.0.1",
+  "local_port": 8080,
+  "subdomain": "my-preview"
+}
+```
+
+### Allocation Response Example (200 OK)
+```json
+{
+  "tunnel_id": "9a7b1c3d-11e2-4b5a-90ef-8f12345678ab",
+  "type": "http",
+  "subdomain": "my-preview",
+  "public_url": "https://my-preview.infinitynoob.lol",
+  "proxy_name": "portx-http-my-preview",
   "frps_host": "portx.infinitynoob.lol",
   "frps_port": 7000
 }
 ```
 
-### `POST /api/v1/tunnel/<tunnel_id>/reregister` — Reclaim existing allocation
-**Headers:** `Authorization: Bearer <token>`  
-**Body:** `{"type": "http", "local_host": "127.0.0.1", "local_port": 8080, "subdomain": "x7k29m", "proxy_name": "portx-http-x7k29m"}`  
-**Response (200):** Same as `POST /api/v1/tunnel`.  
-**Response (409):** Allocation taken by another active tunnel.
-
-### `PUT /api/v1/tunnel/<tunnel_id>/heartbeat` — Keep-alive heartbeat
-**Headers:** `Authorization: Bearer <token>`  
-**Response (200):** `{"status": "ok"}`
-
-### `GET /api/v1/tunnel/<tunnel_id>` — Get tunnel info
-**Headers:** `Authorization: Bearer <token>`  
-**Response (200):** Tunnel information object.
-
-### `DELETE /api/v1/tunnel/<tunnel_id>` — Release allocation
-**Headers:** `Authorization: Bearer <token>`  
-**Response (204):** Empty body. Subdomain / port is released back to pool.
-
-### `GET /health` — Health check
-**Response (200):** `{"status": "ok"}`
-
 ---
 
-## 12. VPS Deployment
+## 8. Self-Hosting & VPS Deployment
 
-### One-command setup (Ubuntu 22.04 / Debian 12)
+Developers who prefer running their own private tunneling relay can deploy the PortX server stack on Ubuntu or Debian in under 2 minutes:
 
 ```bash
 git clone https://github.com/aushaif/portX /opt/portx-src
 sudo bash /opt/portx-src/server/setup.sh
 ```
 
-**What the script configures:**
-1. Installs Python 3, `ufw`, and system utilities.
-2. Downloads and installs the matching `frps` server binary to `/usr/local/bin/frps`.
-3. Copies server files and templates to `/opt/portx/`.
-4. Creates and starts systemd services: `frps.service` and `portx-api.service` (`Restart=always`, `After=network-online.target`).
-5. Configures firewall rules via `ufw`.
+**What the setup script provisions:**
+- Installs Python 3, `ufw` firewall rules, and dependencies.
+- Downloads and provisions the matching `frps` binary.
+- Configures systemd units for `frps.service` and `portx-api.service`.
+- Enables persistent state tracking in `/opt/portx/state.json` with atomic backup guards.
 
 ---
 
-## 13. Supported Platforms
+## 9. Frequently Asked Questions (FAQ)
 
-| OS     | Architecture          | Client Support | Server Support |
-|--------|-----------------------|----------------|----------------|
-| macOS  | ARM64 (Apple Silicon) | Yes            | No             |
-| macOS  | AMD64 (Intel)         | Yes            | No             |
-| Linux  | ARM64                 | Yes            | Yes            |
-| Linux  | AMD64                 | Yes            | Yes            |
+#### Q: How does PortX keep tunnels alive for days without dropping?
+Traditional tools rely on idle TCP connections. When no traffic flows, domestic routers drop the connection from their NAT translation tables, causing silent connection failure. PortX sends bidirectional TCP-level keepalives every 30 seconds and probes application heartbeats. If a packet is lost, it detects failure within 90 seconds and automatically reconnects with zero manual intervention.
+
+#### Q: Does my computer need to stay on?
+Yes. The service you are exposing runs locally on your machine. If your machine sleeps or shuts down, the tunnel pauses. However, with `sudo portx watchdog install`, PortX immediately brings all your tunnels back online as soon as your machine wakes up or boots.
+
+#### Q: Can I run multiple tunnels simultaneously?
+Yes. You can run dozens of HTTP, TCP, and UDP tunnels concurrently. Each tunnel runs in its own isolated process with dedicated kernel-level file locks.
+
+#### Q: Will someone else take my subdomain if my internet blips?
+No. Your subdomain and remote ports are securely registered to your tunnel ID. When your connection recovers, PortX automatically invokes the `reregister` API to reclaim the exact same endpoints.
+
+#### Q: Is PortX free and open-source?
+Yes. PortX is 100% open source under the MIT License and uses official Fast Reverse Proxy binaries directly from GitHub Releases.
 
 ---
 
-## 14. Troubleshooting
+## 10. Website UI / AI Generation Blueprint
 
-### Command not found after install
-```bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
-source ~/.zshrc
-```
+When generating the PortX website, use this architectural layout:
 
-### FRP binary missing or corrupted
-```bash
-curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install.sh | bash
-```
-
-### Tunnel shows "reconnecting"
-Check the per-tunnel log file:
-```bash
-cat ~/.portx/logs/<tunnel-name>.log
-```
-
-### Authentication Failed
-Update your auth token:
-```bash
-portx api <your-auth-token>
-```
-
-### Server Unreachable
-Verify VPS service status:
-```bash
-systemctl status portx-api frps
-```
+1. **Header / Navbar:** Logo, Features, Commands, Reliability, Use Cases, GitHub Link, "Get Started" CTA.
+2. **Hero Section:**
+   - Bold headline: *"Instant, Unbreakable Tunnels to Localhost."*
+   - Subtitle: *"Expose HTTP, TCP, and UDP ports in seconds. Tunnels run in the background, survive network drops, and stay alive indefinitely."*
+   - Interactive terminal / copyable curl command.
+   - Live badge: *"Python 3.12+ • Pure Stdlib • 90s Auto-Recovery"*.
+3. **Interactive Terminal Component:**
+   - Tabs for `HTTP Web App`, `Minecraft Server`, `SSH Remote Access`.
+   - Realistic animated output showing URL generation.
+4. **Reliability Comparison Table:**
+   - Compare PortX vs. traditional alternatives (Keepalives, Background daemon, Boot auto-recovery, UDP support, Hot reload).
+5. **Interactive Command Playground:**
+   - Interactive list of CLI commands (`http`, `tcp`, `udp`, `list`, `edit`, `reload`, `watchdog`).
+6. **Use Cases Grid:**
+   - 4-card grid (Webhooks, Gaming / Minecraft, SSH, Databases).
+7. **Developer Docs & API Section:**
+   - Clean markdown-rendered documentation with quick search.
+8. **Footer:** GitHub repository link, license, and community links.
