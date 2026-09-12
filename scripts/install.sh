@@ -1,17 +1,28 @@
 #!/usr/bin/env bash
-# PortX installer — Linux
-# Usage: curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-linux.sh | bash
+# PortX installer — macOS & Linux
+# Usage: curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install.sh | bash
 
 {
 set -euo pipefail
 
+# ── Detect OS ────────────────────────────────────────────────────────────
+OS="$(uname -s)"
+case "$OS" in
+  Darwin) OS_NAME="macOS" ;;
+  Linux)  OS_NAME="Linux" ;;
+  *)
+    echo "  ✗ Unsupported operating system: $OS" >&2
+    echo "    PortX supports macOS and Linux only." >&2
+    exit 1
+    ;;
+esac
+
 echo ""
-echo "  PortX — Installer (macOS)"
+echo "  PortX — Installer ($OS_NAME)"
 echo "  ─────────────────────────────────────────"
 echo ""
 
 # ── Python version check & install ───────────────────────────────────────
-# We require Python 3.12+ (modern, widely available via Homebrew)
 MIN_MAJOR=3
 MIN_MINOR=12
 
@@ -40,29 +51,55 @@ for cmd in python3.13 python3.12 python3 python; do
 done
 
 if [ -z "$PYTHON" ]; then
-  echo "  ⚠  Python ${MIN_MAJOR}.${MIN_MINOR}+ not found. Attempting to install via Homebrew..."
+  echo "  ⚠  Python ${MIN_MAJOR}.${MIN_MINOR}+ not found. Attempting to install..."
   echo ""
 
-  # Ensure Homebrew is available
-  if ! command -v brew &>/dev/null; then
-    echo "  → Homebrew not found. Installing Homebrew first..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    # Source brew for Apple Silicon
-    if [ -f /opt/homebrew/bin/brew ]; then
-      eval "$(/opt/homebrew/bin/brew shellenv)"
-      export PATH="/opt/homebrew/bin:$PATH"
-    elif [ -f /usr/local/bin/brew ]; then
-      eval "$(/usr/local/bin/brew shellenv)"
-      export PATH="/usr/local/bin:$PATH"
+  if [ "$OS_NAME" = "macOS" ]; then
+    # ── macOS: install via Homebrew ──────────────────────────────────────
+    if ! command -v brew &>/dev/null; then
+      echo "  → Homebrew not found. Installing Homebrew first..."
+      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      # Source brew for Apple Silicon
+      if [ -f /opt/homebrew/bin/brew ]; then
+        eval "$(/opt/homebrew/bin/brew shellenv)"
+        export PATH="/opt/homebrew/bin:$PATH"
+      elif [ -f /usr/local/bin/brew ]; then
+        eval "$(/usr/local/bin/brew shellenv)"
+        export PATH="/usr/local/bin:$PATH"
+      fi
     fi
-  fi
 
-  echo "  → Installing/upgrading Python via Homebrew..."
-  brew install python3 || brew upgrade python3
+    echo "  → Installing/upgrading Python via Homebrew..."
+    brew install python3 || brew upgrade python3
 
-  # Re-evaluate shellenv just in case
-  if command -v brew &>/dev/null; then
-    eval "$(brew shellenv)"
+    # Re-evaluate shellenv just in case
+    if command -v brew &>/dev/null; then
+      eval "$(brew shellenv)"
+    fi
+
+  else
+    # ── Linux: install via system package manager ────────────────────────
+    if command -v apt-get &>/dev/null; then
+      echo "  → Installing Python via apt-get..."
+      sudo apt-get update -qq
+      sudo apt-get install -y python3 python3-pip
+    elif command -v dnf &>/dev/null; then
+      echo "  → Installing Python via dnf..."
+      sudo dnf install -y python3 python3-pip
+    elif command -v yum &>/dev/null; then
+      echo "  → Installing Python via yum..."
+      sudo yum install -y python3 python3-pip
+    elif command -v pacman &>/dev/null; then
+      echo "  → Installing Python via pacman..."
+      sudo pacman -Sy --noconfirm python python-pip
+    elif command -v zypper &>/dev/null; then
+      echo "  → Installing Python via zypper..."
+      sudo zypper install -y python3 python3-pip
+    else
+      echo "  ✗ No supported package manager found." >&2
+      echo "    Please install Python ${MIN_MAJOR}.${MIN_MINOR}+ manually: https://www.python.org/downloads/" >&2
+      exit 1
+    fi
   fi
 
   # Re-locate Python after install
@@ -101,11 +138,13 @@ curl -fsSL "$INSTALLER_URL" -o "$TMP_SCRIPT"
 # ── Add ~/.local/bin to PATH if not already there ────────────────────────
 LOCAL_BIN="$HOME/.local/bin"
 
-# macOS: prefer ~/.zshrc (zsh default since Catalina), fall back to ~/.bash_profile
+# Detect shell rc file
 if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "${SHELL:-}")" = "zsh" ]; then
   SHELL_RC="$HOME/.zshrc"
+elif [ "$OS_NAME" = "macOS" ]; then
+  SHELL_RC="$HOME/.zshrc"         # zsh is the macOS default since Catalina
 else
-  SHELL_RC="$HOME/.bash_profile"
+  SHELL_RC="$HOME/.bashrc"        # bash is the Linux default
 fi
 
 if ! grep -q "$LOCAL_BIN" "$SHELL_RC" 2>/dev/null; then

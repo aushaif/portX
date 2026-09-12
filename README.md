@@ -5,18 +5,22 @@
 PortX is a user-friendly wrapper around [FRP](https://github.com/fatedier/frp).
 FRP binaries are downloaded directly from the official GitHub Releases — PortX never hosts them.
 
+**Tunnels stay alive.** PortX uses active TCP keepalives and heartbeat probes to detect dead connections within 90 seconds and reconnects automatically. No zombie tunnels, no manual reloads.
+
 ---
 
 ## Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-macos.sh | bash
+curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install.sh | bash
 ```
 
-This single command works for both **macOS** and **Linux**. It automatically installs:
-- PortX CLI → `~/.local/bin/portx`
-- FRP client binary → `~/.portx/bin/frpc`
-- Runtime directories → `~/.portx/` (tunnels/, logs/, tunnels.toml)
+This single command works for both **macOS** and **Linux**. It automatically:
+- Detects your operating system
+- Installs Python 3.12+ if missing (Homebrew on macOS, system package manager on Linux)
+- Installs PortX CLI → `~/.local/bin/portx`
+- Downloads FRP client binary → `~/.portx/bin/frpc`
+- Creates runtime directories → `~/.portx/` (tunnels/, logs/, tunnels.toml)
 
 **Requirements:** Python 3.12+ (automatically installed by the script if missing)
 
@@ -120,6 +124,23 @@ You never need to edit this file manually — use `portx api <token>` to update 
 
 ---
 
+## Connection Reliability
+
+PortX is designed to keep tunnels alive indefinitely without manual intervention:
+
+| Layer | Mechanism | Effect |
+|:------|:----------|:-------|
+| **TCP Keepalive** | `tcpMuxKeepaliveInterval = 30s` in frpc config | Prevents NAT/firewall tables from silently dropping idle connections (the root cause of zombie tunnels after several days) |
+| **Heartbeat Probes** | `heartbeatInterval = 30s`, `heartbeatTimeout = 90s` | frpc actively pings frps every 30 s. If no reply in 90 s, frpc self-terminates and the worker reconnects |
+| **Live Log Monitoring** | `worker.py` scans frpc output continuously | Detects failure markers (`heartbeat timeout`, `connection is closed`, `i/o timeout`, etc.) and triggers an immediate reconnect |
+| **Auto-Reconnect** | Exponential backoff: 2 s → 120 s max | Reconnects automatically after any dropout — no manual `portx reload` needed |
+| **Boot Recovery** | System watchdog daemon | Automatically restores all tunnels after machine reboot or power failure |
+| **Server Stale Cleanup** | Reaper runs every 5 min on VPS | Releases allocations from tunnels silent for 10+ min, preventing port conflicts on reconnect |
+
+Tunnels **only restart when a real failure is detected** — there are no arbitrary periodic refreshes that would interrupt connections.
+
+---
+
 ## How it works
 
 ```
@@ -130,9 +151,15 @@ portx http 8080
     │                         Allocate subdomain
     │                         Return frps details
     │
-    ├─ Generate frpc TOML config in ~/.portx/tunnels/
+    ├─ Generate frpc TOML config with keepalives in ~/.portx/tunnels/
+    │       heartbeatInterval=30, heartbeatTimeout=90,
+    │       tcpMuxKeepaliveInterval=30
     │
-    ├─ Spawn background frpc process
+    ├─ Spawn background worker.py (detached daemon)
+    │       └─ Starts frpc
+    │       └─ Monitors frpc output for failure markers
+    │       └─ Sends heartbeats to server every 60 s
+    │       └─ Auto-reconnects on any failure
     │
     └─ Tunnel live: https://<subdomain>.infinitynoob.lol → 127.0.0.1:8080
 
@@ -166,8 +193,7 @@ portx/
 ├── Formula/
 │   └── portx-cli.rb              # Homebrew formula
 └── scripts/
-    ├── install-macos.sh           # macOS curl-pipe installer
-    └── install-linux.sh           # Linux curl-pipe installer
+    └── install.sh                 # macOS & Linux unified installer
 ```
 
 **Runtime layout:**
@@ -230,7 +256,7 @@ source ~/.zshrc
 ls -la ~/.portx/bin/frpc
 
 # Reinstall to restore
-curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-macos.sh | bash
+curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install.sh | bash
 ```
 
 ### Old tunnels still showing

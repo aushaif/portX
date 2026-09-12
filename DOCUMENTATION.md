@@ -1,6 +1,6 @@
 # PortX — Full Technical Documentation
 
-> Version 2.1 | Last updated: September 2026
+> Version 2.2 | Last updated: September 2026
 
 ---
 
@@ -30,11 +30,15 @@ PortX is a command-line tool that exposes your **local ports to the internet** u
 **Key features:**
 - One command to create persistent HTTP, TCP, or UDP tunnels
 - Tunnels run as **background daemons** — no active terminal window required
+- **Active Keepalives:** TCP-level and application-level heartbeats (every 30 s) prevent NAT/firewall tables from silently expiring idle connections
+- **Fast Dead-Connection Detection:** If the server stops responding, frpc detects it within 90 seconds and automatically reconnects — no silent zombie connections
 - **Auto-Reconnection & Recovery:** Automatic exponential backoff reconnects if network drops, server restarts, or frpc crashes
+- **Indefinite Uptime:** Tunnels stay connected continuously and only restart when an actual failure is detected — no arbitrary periodic refreshes
 - **Persistent Allocations:** Subdomains and TCP/UDP ports remain reserved across restarts and reboots
 - **Crash & Power-Failure Recovery:** System-level watchdog automatically restores tunnels on boot without manual login
 - **Graceful Zero-Downtime Reload:** Edit configurations and reload tunnels on the fly via `portx edit` and `portx reload`
 - **Concurrency & Process Safety:** Kernel-level file locking (`fcntl`) guarantees zero duplicate worker processes
+- **Server-side Stale Cleanup:** The server automatically releases allocations from tunnels that haven't sent a heartbeat in 10+ minutes, preventing port exhaustion
 - Auth token-based access control
 - Zero external Python dependencies (pure Python 3.12+ stdlib)
 
@@ -88,7 +92,7 @@ Two server-side components run on the VPS:
 ### Quick Install (macOS & Linux)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-macos.sh | bash
+curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install.sh | bash
 ```
 
 - **macOS:** Auto-installs Python 3.12+ via Homebrew if not present.
@@ -478,6 +482,11 @@ serverPort    = 7000
 auth.method   = "token"
 auth.token    = "<your-auth-token>"
 
+[transport]
+heartbeatInterval        = 30   # Probe server every 30 s
+heartbeatTimeout         = 90   # Reconnect if no reply within 90 s
+tcpMuxKeepaliveInterval  = 30   # TCP-level keepalive every 30 s (prevents NAT expiry)
+
 [log]
 level = "warn"
 
@@ -489,6 +498,10 @@ localPort = 8080
 subdomain = "x7k29m"
 ```
 
+The `[transport]` block is critical for long-running tunnels:
+- `heartbeatInterval` / `heartbeatTimeout`: frpc actively probes the frps server every 30 s. If no response is received for 90 s, the connection is declared dead and frpc reconnects automatically.
+- `tcpMuxKeepaliveInterval`: Sends TCP-level keep-alive packets to prevent home routers and ISP NAT tables from silently dropping idle connections (a common cause of zombie tunnels after several days).
+
 ---
 
 ## 7. How Tunnels & Reconnection Work
@@ -499,12 +512,28 @@ subdomain = "x7k29m"
 1. portx.py parses arguments and checks local address.
 2. api_client.py sends POST /api/v1/tunnel with auth token.
 3. portx_server.py allocates subdomain and returns connection parameters.
-4. frp_config.py writes ~/.portx/tunnels/<name>.toml.
+4. frp_config.py writes ~/.portx/tunnels/<name>.toml with [transport] keepalive settings.
 5. state.py writes tunnel record to ~/.portx/tunnels.toml under fcntl lock.
 6. commands.py spawns worker.py in a detached session.
 7. worker.py acquires ~/.portx/locks/<name>.lock and starts frpc.
-8. worker.py starts a background heartbeat thread (PUT /api/v1/tunnel/<id>/heartbeat).
+8. worker.py starts a background heartbeat thread (PUT /api/v1/tunnel/<id>/heartbeat every 60s).
 9. Tunnel is live at https://<subdomain>.infinitynoob.lol.
+```
+
+### Connection Monitoring & Dead-Connection Detection
+
+While frpc is running, `worker.py` monitors it continuously:
+
+```
+- frpc sends TCP-level keepalive pings to frps every 30 s (tcpMuxKeepaliveInterval).
+- frpc probes the application-level heartbeat every 30 s (heartbeatInterval).
+- If no heartbeat reply is received within 90 s (heartbeatTimeout), frpc self-terminates.
+- worker.py also scans frpc's live log output for failure markers:
+    "heartbeat timeout", "connection is closed", "i/o timeout",
+    "read tcp", "write tcp", "proxy is not working", etc.
+- Upon detecting any of these, worker.py immediately kills frpc and begins reconnection.
+- Tunnels stay connected indefinitely — there are no periodic forced refreshes.
+  frpc is only restarted when an actual failure is detected.
 ```
 
 ### Auto-Reconnection & Conflict Recovery Flow
@@ -512,7 +541,7 @@ subdomain = "x7k29m"
 If network is lost, the server restarts, or `frpc` drops:
 
 ```
-1. frpc exits unexpectedly.
+1. frpc exits (either by self-terminating after heartbeat timeout, or due to a crash).
 2. worker.py detects exit and enters exponential backoff loop (2s → 4s → ... → 120s max).
 3. worker.py restarts frpc with the existing config.
 4. If frpc fails with proxy name/port conflict (e.g. server wiped state):
@@ -529,6 +558,19 @@ If network is lost, the server restarts, or `frpc` drops:
 4. watchdog.py checks all tunnels in ~/.portx/tunnels.toml.
 5. For every tunnel where admin_stopped != 1 and worker lock is not held:
    watchdog.py spawns worker.py, fully restoring all tunnels.
+```
+
+### Server-side Stale Tunnel Cleanup
+
+The server (`portx_server.py`) runs a background reaper thread:
+
+```
+- Every 5 minutes, the reaper scans all active tunnel allocations.
+- Any tunnel that has not sent a heartbeat for 10+ minutes is automatically released.
+  (Configurable via PORTX_STALE_TIMEOUT environment variable, default: 600 seconds.)
+- This ensures a reconnecting client can always re-register cleanly without port conflicts.
+- The stale timeout (10 min) is intentionally larger than the frpc heartbeat timeout (90 s)
+  to avoid false positives during brief network blips.
 ```
 
 ---
@@ -565,8 +607,7 @@ portx/
 │   └── portx.rb                  # Homebrew formula
 │
 ├── scripts/
-│   ├── install-macos.sh          # macOS / Linux unified curl installer
-│   └── install-linux.sh          # Symlink to install-macos.sh
+│   └── install.sh                # macOS & Linux unified curl installer
 │
 ├── README.md                     ← Quick start guide
 └── DOCUMENTATION.md              ← Comprehensive technical documentation
@@ -596,6 +637,8 @@ Detached daemon per active tunnel:
 - Handles `SIGUSR1` for graceful reload (kills `frpc` and restarts immediately with zero backoff).
 - Conflict resolution via reregister API.
 - Heartbeat loop thread (`PUT /api/v1/tunnel/<id>/heartbeat` every 60s).
+- Monitors frpc's live stdout for failure log markers and triggers immediate reconnect.
+- **Indefinite runtime:** Tunnels stay connected until an actual failure is detected. There is no periodic forced restart.
 
 ### `watchdog.py`
 System daemon running at boot:
@@ -630,6 +673,7 @@ Lightweight REST API server built with Python standard library (`http.server`).
 - **Corruption Protection:** Automatically recovers from `.bak` if primary state is corrupt; aborts startup safely if both fail to prevent URL hijacking.
 - **Atomic Writes:** Saves state via temporary files to avoid partial write corruption.
 - **Tunnel Reclamation:** Supports `reregister` API allowing reconnecting clients to reclaim their exact URLs/ports.
+- **Stale Tunnel Reaper:** Background thread runs every 5 minutes and releases allocations from tunnels that have not sent a heartbeat in 10+ minutes (configurable via `PORTX_STALE_TIMEOUT` env var). Prevents port exhaustion from abandoned or crashed clients.
 
 ---
 
@@ -716,7 +760,7 @@ source ~/.zshrc
 
 ### FRP binary missing or corrupted
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install-macos.sh | bash
+curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install.sh | bash
 ```
 
 ### Tunnel shows "reconnecting"
