@@ -69,12 +69,17 @@ def start_frpc(
     # Shared state between the watcher thread and this thread
     _ready    = threading.Event()
     _failed   = threading.Event()
+    _stop     = threading.Event()   # signals watcher to exit after startup
     _fail_msg: list[str] = []
     _all_lines: list[str] = []
 
     def _watch() -> None:
-        """Read frpc output lines and signal success / failure events."""
+        """Read frpc output lines and signal success / failure events.
+        Exits as soon as _stop is set so the caller's drainer can take over.
+        """
         for raw_line in proc.stdout:  # type: ignore[union-attr]
+            if _stop.is_set():
+                break
             line = raw_line.rstrip()
             _all_lines.append(line)
             lower = line.lower()
@@ -95,8 +100,13 @@ def start_frpc(
 
     _ready.wait(timeout=timeout)
 
+    # Signal the watcher to stop consuming stdout so the worker's drainer
+    # thread can take over and watch for live connection-loss markers.
+    _stop.set()
+
     # ── Process already exited ─────────────────────────────────────────────
     if proc.poll() is not None:
+        watcher.join(timeout=2)
         tail = "\n    ".join(_all_lines[-8:]) or "frpc produced no output."
         raise FRPError(
             "frpc exited unexpectedly during startup.\n"
@@ -105,12 +115,15 @@ def start_frpc(
 
     # ── Explicit failure marker detected ──────────────────────────────────
     if _failed.is_set():
+        watcher.join(timeout=2)
         stop_frpc(proc)
         msg = _fail_msg[0] if _fail_msg else "frpc reported a connection error."
         raise FRPError(f"Tunnel connection failed: {msg}")
 
     # ── Timeout reached but process is still running → assume success ──────
     # (frpc on newer versions may not print a per-proxy "success" line)
+    # Watcher exits shortly (checks _stop); caller's drainer thread takes over.
+    watcher.join(timeout=2)
     return proc
 
 

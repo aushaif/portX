@@ -197,7 +197,7 @@ Examples:
 """
 
 def main() -> None:
-    if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ("help", "-h", "--help")):
+    if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ("help", "-h", "--help", "-help")):
         _hdr()
         print("  PortX — Simple tunnels")
         print("\n  Usage:")

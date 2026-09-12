@@ -18,13 +18,27 @@ import config as _cfg
 # ---------------------------------------------------------------------------
 
 def _base(frps_host: str, frps_port: int) -> str:
-    """Common [server] section shared by all tunnel types."""
+    """Common [server] section shared by all tunnel types.
+
+    transport block ensures frpc actively probes the connection every
+    30 s and gives up after 90 s of silence — so a silently-dead TCP
+    connection (NAT timeout, ISP idle cutoff, VPS reboot) is detected
+    and triggers an automatic reconnect instead of creating a zombie.
+    tcpMuxKeepaliveInterval sends TCP-level keep-alives over the
+    multiplexed connection to prevent NAT tables from expiring the
+    underlying socket after a few minutes of idle traffic.
+    """
     auth_token = _cfg.get_auth_token()
     return (
         f'serverAddr = "{frps_host}"\n'
         f"serverPort = {frps_port}\n"
         'auth.method = "token"\n'
         f'auth.token = "{auth_token}"\n'
+        "\n"
+        "[transport]\n"
+        "heartbeatInterval = 30\n"          # probe server every 30 s
+        "heartbeatTimeout  = 90\n"          # reconnect if no reply for 90 s
+        "tcpMuxKeepaliveInterval = 30\n"    # TCP-level keepalive every 30 s
         "\n"
         "[log]\n"
         'level = "warn"\n'

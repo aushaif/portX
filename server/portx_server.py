@@ -96,7 +96,13 @@ UDP_PORT_MAX = int(os.environ.get("PORTX_UDP_PORT_MAX", "33999"))
 
 CUSTOM_PORT_MIN = int(os.environ.get("PORTX_CUSTOM_PORT_MIN", "1"))
 CUSTOM_PORT_MAX = int(os.environ.get("PORTX_CUSTOM_PORT_MAX", "65000"))
-RESERVED_TCP_PORTS = {22, 80, 443, FRPS_PORT, int(os.environ.get("PORTX_API_PORT", "8765"))}
+REACHABLE_PORTS = {22, 80, 443, FRPS_PORT, int(os.environ.get("PORTX_API_PORT", "8765"))}
+RESERVED_TCP_PORTS = REACHABLE_PORTS
+
+# Tunnels that haven't sent a heartbeat for this many seconds are considered
+# dead and will be released by the reaper thread.  Default: 10 minutes.
+# (The client sends a heartbeat every 60 s, so 10 min = ~10 missed beats.)
+STALE_TIMEOUT = int(os.environ.get("PORTX_STALE_TIMEOUT", str(10 * 60)))
 
 # Path for persistent allocation state — survives server restarts
 STATE_FILE = Path(os.environ.get("PORTX_STATE_FILE", "/opt/portx/state.json"))
@@ -476,6 +482,22 @@ class TunnelAllocator:
             # State is persisted every allocate/release; heartbeat is best-effort.
             return True
 
+    def release_stale(self, max_age: float) -> list[str]:
+        """
+        Release all tunnels whose last_seen is older than `max_age` seconds.
+        Returns a list of released tunnel_ids for logging.
+        """
+        now = time.time()
+        stale_ids = [
+            tid for tid, info in self._tunnels.items()
+            if now - info.get("last_seen", now) > max_age
+        ]
+        released = []
+        for tid in stale_ids:
+            if self.release(tid):
+                released.append(tid)
+        return released
+
     # ── Info ──────────────────────────────────────────────────────────────
 
     def get_info(self, tunnel_id: str) -> dict | None:
@@ -701,6 +723,33 @@ class PortXHandler(BaseHTTPRequestHandler):
 
 
 # ---------------------------------------------------------------------------
+# Stale tunnel reaper
+# ---------------------------------------------------------------------------
+
+def _stale_reaper_loop() -> None:
+    """
+    Background thread: periodically release tunnels that haven't sent a
+    heartbeat within STALE_TIMEOUT seconds.  This prevents zombie tunnel
+    allocations from blocking reregistration after a client reconnects.
+    """
+    # Check every 2 minutes; stale threshold is STALE_TIMEOUT (default 10 min)
+    CHECK_INTERVAL = 120
+    log.info("Stale reaper started (timeout=%ds, check every %ds)", STALE_TIMEOUT, CHECK_INTERVAL)
+    while True:
+        time.sleep(CHECK_INTERVAL)
+        try:
+            released = _allocator.release_stale(STALE_TIMEOUT)
+            if released:
+                log.info(
+                    "Stale reaper released %d tunnel(s): %s",
+                    len(released),
+                    ", ".join(r[:8] + "..." for r in released),
+                )
+        except Exception as exc:
+            log.error("Stale reaper error: %s", exc)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -711,6 +760,11 @@ def main() -> None:
     log.info("  TCP domain  : %s  (ports %d–%d)", TCP_DOMAIN, TCP_PORT_MIN, TCP_PORT_MAX)
     log.info("  UDP domain  : %s  (ports %d–%d)", UDP_DOMAIN, UDP_PORT_MIN, UDP_PORT_MAX)
     log.info("  frps        : %s:%d", FRPS_HOST, FRPS_PORT)
+    log.info("  Stale timeout: %ds", STALE_TIMEOUT)
+
+    # Start background stale-tunnel reaper
+    reaper = threading.Thread(target=_stale_reaper_loop, daemon=True, name="stale-reaper")
+    reaper.start()
 
     server = HTTPServer((API_HOST, API_PORT), PortXHandler)
     log.info("Listening on %s:%d", API_HOST, API_PORT)

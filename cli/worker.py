@@ -60,9 +60,12 @@ import frp_runner as _runner
 import state as _state
 
 # ── Constants ─────────────────────────────────────────────────────────────
-_INITIAL_BACKOFF    = 2    # seconds
-_MAX_BACKOFF        = 120  # seconds
-_HEARTBEAT_INTERVAL = 60   # seconds between heartbeats
+_INITIAL_BACKOFF    = 2      # seconds
+_MAX_BACKOFF        = 120    # seconds
+_HEARTBEAT_INTERVAL = 60     # seconds between heartbeats
+# Force a graceful frpc reload after this many seconds even if frpc looks
+# healthy.  Breaks any long-lived zombie before users notice (~12 h).
+_MAX_CONNECTION_AGE = 43_200  # 12 hours
 
 # frpc log markers that signal a fatal configuration problem
 _FATAL_MARKERS = (
@@ -137,6 +140,50 @@ def _kill_frpc() -> None:
                 _proc.kill()
         except OSError:
             pass
+
+
+# frpc output patterns that indicate the tunnel connection was lost.
+# When frpc prints these even while the process is still alive, we need
+# to kill it and reconnect — otherwise we get a zombie process.
+_LIVE_FAILURE_MARKERS = (
+    "heartbeat timeout",
+    "connection is closed",
+    "i/o timeout",
+    "connection refused",
+    "login to server failed",
+    "failed to login",
+    "read tcp",           # covers "read tcp ... EOF" and similar
+    "write tcp",          # covers "write tcp ... broken pipe"
+    "proxy is not working",
+    "start error",
+)
+
+
+def _start_stdout_drainer(
+    proc: "subprocess.Popen",
+    conn_lost_event: threading.Event,
+) -> threading.Thread:
+    """
+    Drain frpc's stdout/stderr in a background thread.
+    Sets `conn_lost_event` if a live-failure marker is detected.
+    Runs until frpc exits (stdout EOF).
+    """
+    def _drain() -> None:
+        try:
+            for raw in proc.stdout:  # type: ignore[union-attr]
+                line = raw.rstrip()
+                if line:
+                    _log(f"[frpc] {line}")
+                lower = line.lower()
+                if any(m in lower for m in _LIVE_FAILURE_MARKERS):
+                    _log(f"Live failure marker detected in frpc output: {line}")
+                    conn_lost_event.set()
+        except Exception:
+            pass  # proc already closed
+
+    t = threading.Thread(target=_drain, daemon=True, name=f"drain-{_tunnel_name}")
+    t.start()
+    return t
 
 
 # ── Heartbeat thread ──────────────────────────────────────────────────────
@@ -401,6 +448,10 @@ def main() -> None:
             hb_thread.start()
 
         # ── Monitor frpc ───────────────────────────────────────────────────
+        conn_lost_event = threading.Event()
+        drain_thread = _start_stdout_drainer(_proc, conn_lost_event)
+        conn_start = time.monotonic()
+
         while not _shutdown_flag:
             ret = _proc.poll()
             if ret is not None:
@@ -415,7 +466,26 @@ def main() -> None:
                 _kill_frpc()
                 break
 
+            # Live failure detected in frpc's own output — restart now
+            if conn_lost_event.is_set():
+                _log("Live connection failure detected — restarting frpc...")
+                _kill_frpc()
+                break
+
+            # Max-age safeguard: force a reload before connection can zombie
+            age = time.monotonic() - conn_start
+            if age >= _MAX_CONNECTION_AGE:
+                _was_reload = True
+                _log(
+                    f"Max connection age ({_MAX_CONNECTION_AGE // 3600}h) reached — "
+                    "forcing graceful reload to prevent zombie connections..."
+                )
+                _kill_frpc()
+                break
+
             time.sleep(1)
+
+        drain_thread.join(timeout=2)
 
         # Stop heartbeat
         hb_stop.set()
