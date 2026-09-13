@@ -209,8 +209,8 @@ def _regenerate_config(info: dict) -> None:
     local_host  = tunnel.get("local_host", "127.0.0.1")
     local_port  = int(tunnel.get("local_port", 0))
     config_path = Path(tunnel["frp_config_path"])
-    frps_host   = info.get("frps_host", _cfg.get_frps_host())
-    frps_port   = info.get("frps_port", _cfg.get_frps_port())
+    frps_host   = _cfg.get_frps_host()
+    frps_port   = _cfg.get_frps_port()
     proxy_name  = info.get("proxy_name", "")
 
     if t == "http":
@@ -355,16 +355,12 @@ def main() -> None:
 
     _log(f"Worker started for tunnel '{_tunnel_name}' (PID={os.getpid()})")
 
-    # If config file is already missing before our first attempt, try to recover
+    # Ensure config file exists and is synchronized with current frps_host, port, and token
     if not frp_config_path.exists():
-        _log("FRP config file missing on startup — trying reregister...")
-        if not _try_reregister_or_new():
-            _log("Cannot recover config — marking tunnel as failed")
-            _state.update_tunnel(_tunnel_name, status="failed", error="Config missing on startup")
-            sys.exit(1)
-        # Reload state after reregister regenerated config
-        tunnel = _state.get_tunnel(_tunnel_name)
-        frp_config_path = Path(tunnel["frp_config_path"])
+        _log("FRP config file missing on startup — generating from state...")
+        _toml.sync_tunnel_config_file(frp_config_path, _tunnel_name, tunnel, force=True)
+    elif _toml.sync_tunnel_config_file(frp_config_path, _tunnel_name, tunnel):
+        _log(f"Synced FRP config to current FRPS host {_cfg.get_frps_host()}:{_cfg.get_frps_port()}")
 
     backoff = _INITIAL_BACKOFF
     attempt = 0
@@ -389,7 +385,13 @@ def main() -> None:
 
         frp_config_path = Path(tunnel["frp_config_path"])
 
-        _log(f"Connection attempt #{attempt}...")
+        # Check if FRPS host, port, or auth token changed while running/reconnecting
+        if _toml.sync_tunnel_config_file(frp_config_path, _tunnel_name, tunnel):
+            _log(f"Detected FRPS server update — updated config to {_cfg.get_frps_host()}:{_cfg.get_frps_port()}")
+            # Attempt immediately with fresh server config
+            backoff = _INITIAL_BACKOFF
+
+        _log(f"Connection attempt #{attempt} (server={_cfg.get_frps_host()}:{_cfg.get_frps_port()})...")
 
         # ── Try to start frpc ─────────────────────────────────────────────
         try:

@@ -103,8 +103,8 @@ def _start_tunnel(
     tunnel_id  = info["tunnel_id"]
     public_url = info.get("public_url", "")
     proxy_name = info["proxy_name"]
-    frps_host  = info.get("frps_host", _cfg.get_frps_host())
-    frps_port  = info.get("frps_port", _cfg.get_frps_port())
+    frps_host  = _cfg.get_frps_host()
+    frps_port  = _cfg.get_frps_port()
 
     # 4. Generate TOML config
     if tunnel_type == "http":
@@ -151,6 +151,8 @@ def _start_tunnel(
         proxy_name=proxy_name,
         subdomain=subdomain_to_save,
         remote_port=remote_port_to_save,
+        frps_host=frps_host,
+        frps_port=frps_port,
         auto_start=1,
         admin_stopped=0,
     )

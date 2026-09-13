@@ -16,6 +16,7 @@ from pathlib import Path
 
 import api_client as _api
 import config as _cfg
+import frp_config as _toml
 import state as _state
 
 
@@ -60,6 +61,12 @@ def _stop_tunnel(name: str, tunnel: dict) -> None:
 
 def _spawn_worker(name: str) -> None:
     """Spawn the worker process in the background."""
+    # Ensure config file exists and is synchronized with current frps_host, port, and token
+    t = _state.get_tunnel(name)
+    if t:
+        cfg_path = Path(t.get("frp_config_path") or (_state.CONFIGS_DIR / f"{name}.toml"))
+        _toml.sync_tunnel_config_file(cfg_path, name, t)
+
     worker_script = Path(__file__).resolve().parent / "worker.py"
 
     proc = subprocess.Popen(
@@ -392,8 +399,8 @@ def cmd_edit(name: str) -> None:
     tunnel_id  = t.get("tunnel_id", "")
     proxy_name = t.get("proxy_name", "")
     public_url = t.get("public_url", "")
-    frps_host  = t.get("frps_host") or _cfg.get_frps_host()
-    frps_port  = t.get("frps_port") or _cfg.get_frps_port()
+    frps_host  = _cfg.get_frps_host()
+    frps_port  = _cfg.get_frps_port()
 
     if new_type in ("tcp", "udp"):
         if not (1 <= new_remote_port <= 65000):
@@ -999,7 +1006,12 @@ def cmd_config_set(key: str, value: str) -> None:
     display_val = value if key != "auth_token" else value[:6] + "*" * max(0, len(value)-6)
     print(f"\n  ✓ Set {key} = {display_val}")
     print(f"  Saved to: {_cfg.CONFIG_TOML}\n")
-    print("  Note: already-running tunnels will pick this up on next restart/reload.\n")
+
+    # Automatically sync existing tunnels and reload workers if needed
+    if key in ("frps_host", "frps_port", "http_domain", "tcp_domain", "udp_domain", "auth_token"):
+        count = _sync_all_existing_tunnels(restart_running=True)
+        if count > 0:
+            print(f"  ✓ Automatically synchronized {count} existing tunnel config(s) to new settings.\n")
 
 
 def cmd_config_reset() -> None:
@@ -1011,3 +1023,54 @@ def cmd_config_reset() -> None:
     print()
     print("  Settings now fall back to portx.config.json / built-in defaults.")
     print()
+    count = _sync_all_existing_tunnels(restart_running=True)
+    if count > 0:
+        print(f"  ✓ Automatically synchronized {count} existing tunnel config(s) to default settings.\n")
+
+
+def _sync_all_existing_tunnels(restart_running: bool = True) -> int:
+    """
+    Update all saved tunnel .toml configs and public URLs in state to match
+    the current frps_host, frps_port, and domain settings.
+    If restart_running is True, reloads or restarts any running/reconnecting worker.
+    Returns the count of updated tunnels.
+    """
+    tunnels = _state.list_tunnels()
+    if not tunnels:
+        return 0
+
+    updated = 0
+    current_frps_host = _cfg.get_frps_host()
+    current_frps_port = _cfg.get_frps_port()
+    current_http_dom  = _cfg.get_http_domain()
+    current_tcp_dom   = _cfg.get_tcp_domain()
+    current_udp_dom   = _cfg.get_udp_domain()
+
+    for name, t in tunnels.items():
+        cfg_path = Path(t.get("frp_config_path") or (_state.CONFIGS_DIR / f"{name}.toml"))
+        _toml.sync_tunnel_config_file(cfg_path, name, t)
+
+        t_type = t.get("type", "http")
+        updates: dict = {
+            "frps_host": current_frps_host,
+            "frps_port": current_frps_port,
+        }
+        if t_type == "http" and t.get("subdomain"):
+            updates["public_url"] = f"https://{t['subdomain']}.{current_http_dom}"
+        elif t_type in ("tcp", "udp") and t.get("remote_port"):
+            dom = current_tcp_dom if t_type == "tcp" else current_udp_dom
+            updates["public_url"] = f"{dom}:{t['remote_port']}"
+
+        _state.update_tunnel(name, **updates)
+        updated += 1
+
+        if restart_running and (_state.is_worker_locked(name) or t.get("status") in ("starting", "running", "reconnecting")):
+            pid = int(t.get("pid", 0) or 0)
+            if pid > 0:
+                try:
+                    os.kill(pid, signal.SIGUSR1)
+                except OSError:
+                    _kill_worker(name, t)
+                    _spawn_worker(name)
+
+    return updated

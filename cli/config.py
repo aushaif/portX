@@ -175,7 +175,7 @@ def _unset(section: str, key: str) -> None:
 
 def get_frps_host() -> str:
     return _get("portx", "frps_host", "PORTX_FRPS_HOST",
-                "server", "frps_host", "portx.infinitynoob.lol")
+                "server", "frps_host", "server.infinitynoob.lol")
 
 def get_frps_port() -> int:
     return int(_get("portx", "frps_port", "PORTX_FRPS_PORT",
@@ -183,7 +183,7 @@ def get_frps_port() -> int:
 
 def get_api_url() -> str:
     return _get("portx", "api_url", "PORTX_API_URL",
-                "server", "api_url", "http://portx.infinitynoob.lol:8765")
+                "server", "api_url", "http://server.infinitynoob.lol:8765")
 
 def get_http_domain() -> str:
     return _get("portx", "http_domain", "PORTX_HTTP_DOMAIN",
