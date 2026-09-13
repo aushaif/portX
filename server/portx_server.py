@@ -76,39 +76,79 @@ from typing import Any
 
 
 # ---------------------------------------------------------------------------
-# Configuration (all overridable via environment variables)
+# Load portx.config.json (project-level defaults) — optional
+# Priority: env var > portx.config.json > built-in constant
 # ---------------------------------------------------------------------------
 
-API_HOST = os.environ.get("PORTX_API_HOST", "0.0.0.0")
-API_PORT = int(os.environ.get("PORTX_API_PORT", "8765"))
+def _load_project_cfg() -> dict:
+    """Search for portx.config.json in standard locations."""
+    candidates = [
+        Path(__file__).resolve().parent.parent / "portx.config.json",  # dev / git clone
+        Path("/opt/portx/portx.config.json"),                           # VPS install
+    ]
+    for p in candidates:
+        if p.exists():
+            try:
+                return json.loads(p.read_text("utf-8"))
+            except Exception:
+                pass
+    return {}
 
-FRPS_HOST = os.environ.get("PORTX_FRPS_HOST", "portx.infinitynoob.lol")
-FRPS_PORT = int(os.environ.get("PORTX_FRPS_PORT", "7000"))
+_PCFG = _load_project_cfg()
 
-HTTP_DOMAIN = os.environ.get("PORTX_HTTP_DOMAIN", "infinitynoob.lol")
-TCP_DOMAIN  = os.environ.get("PORTX_TCP_DOMAIN",  "tcp.portx.infinitynoob.lol")
-UDP_DOMAIN  = os.environ.get("PORTX_UDP_DOMAIN",  "udp.portx.infinitynoob.lol")
 
-TCP_PORT_MIN = int(os.environ.get("PORTX_TCP_PORT_MIN", "30000"))
-TCP_PORT_MAX = int(os.environ.get("PORTX_TCP_PORT_MAX", "31999"))
-UDP_PORT_MIN = int(os.environ.get("PORTX_UDP_PORT_MIN", "32000"))
-UDP_PORT_MAX = int(os.environ.get("PORTX_UDP_PORT_MAX", "33999"))
+def _pcfg(section: str, key: str, fallback: object) -> object:
+    return _PCFG.get(section, {}).get(key, fallback)
 
-CUSTOM_PORT_MIN = int(os.environ.get("PORTX_CUSTOM_PORT_MIN", "1"))
-CUSTOM_PORT_MAX = int(os.environ.get("PORTX_CUSTOM_PORT_MAX", "65000"))
-REACHABLE_PORTS = {22, 80, 443, FRPS_PORT, int(os.environ.get("PORTX_API_PORT", "8765"))}
+
+# ---------------------------------------------------------------------------
+# Configuration (env var overrides portx.config.json overrides built-in default)
+# ---------------------------------------------------------------------------
+
+API_HOST = os.environ.get("PORTX_API_HOST",
+    str(_pcfg("server", "api_host", "0.0.0.0")))
+API_PORT = int(os.environ.get("PORTX_API_PORT",
+    str(_pcfg("server", "api_port", 8765))))
+
+FRPS_HOST = os.environ.get("PORTX_FRPS_HOST",
+    str(_pcfg("server", "frps_host", "portx.infinitynoob.lol")))
+FRPS_PORT = int(os.environ.get("PORTX_FRPS_PORT",
+    str(_pcfg("server", "frps_port", 7000))))
+
+HTTP_DOMAIN = os.environ.get("PORTX_HTTP_DOMAIN",
+    str(_pcfg("domains", "http", "infinitynoob.lol")))
+TCP_DOMAIN  = os.environ.get("PORTX_TCP_DOMAIN",
+    str(_pcfg("domains", "tcp", "tcp.portx.infinitynoob.lol")))
+UDP_DOMAIN  = os.environ.get("PORTX_UDP_DOMAIN",
+    str(_pcfg("domains", "udp", "udp.portx.infinitynoob.lol")))
+
+TCP_PORT_MIN = int(os.environ.get("PORTX_TCP_PORT_MIN",
+    str(_pcfg("ports", "tcp_pool_min", 30000))))
+TCP_PORT_MAX = int(os.environ.get("PORTX_TCP_PORT_MAX",
+    str(_pcfg("ports", "tcp_pool_max", 31999))))
+UDP_PORT_MIN = int(os.environ.get("PORTX_UDP_PORT_MIN",
+    str(_pcfg("ports", "udp_pool_min", 32000))))
+UDP_PORT_MAX = int(os.environ.get("PORTX_UDP_PORT_MAX",
+    str(_pcfg("ports", "udp_pool_max", 33999))))
+
+CUSTOM_PORT_MIN = int(os.environ.get("PORTX_CUSTOM_PORT_MIN",
+    str(_pcfg("ports", "custom_min", 1))))
+CUSTOM_PORT_MAX = int(os.environ.get("PORTX_CUSTOM_PORT_MAX",
+    str(_pcfg("ports", "custom_max", 65000))))
+REACHABLE_PORTS = {22, 80, 443, FRPS_PORT, API_PORT}
 RESERVED_TCP_PORTS = REACHABLE_PORTS
 
 # Tunnels that haven't sent a heartbeat for this many seconds are considered
 # dead and will be released by the reaper thread.  Default: 10 minutes.
-# (The client sends a heartbeat every 60 s, so 10 min = ~10 missed beats.)
-STALE_TIMEOUT = int(os.environ.get("PORTX_STALE_TIMEOUT", str(10 * 60)))
+STALE_TIMEOUT = int(os.environ.get("PORTX_STALE_TIMEOUT",
+    str(_pcfg("timeouts", "stale_heartbeat_timeout", 10 * 60))))
 
 # Path for persistent allocation state — survives server restarts
 STATE_FILE = Path(os.environ.get("PORTX_STATE_FILE", "/opt/portx/state.json"))
 
 SUBDOMAIN_LEN   = 6
 SUBDOMAIN_CHARS = string.ascii_lowercase + string.digits
+
 
 # ---------------------------------------------------------------------------
 # Logging

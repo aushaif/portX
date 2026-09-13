@@ -103,13 +103,13 @@ def _start_tunnel(
     tunnel_id  = info["tunnel_id"]
     public_url = info.get("public_url", "")
     proxy_name = info["proxy_name"]
-    frps_host  = info.get("frps_host", _cfg.FRPS_HOST)
-    frps_port  = info.get("frps_port", _cfg.FRPS_PORT)
+    frps_host  = info.get("frps_host", _cfg.get_frps_host())
+    frps_port  = info.get("frps_port", _cfg.get_frps_port())
 
     # 4. Generate TOML config
     if tunnel_type == "http":
         assigned_sub = subdomain if subdomain else info.get("subdomain", "")
-        public_url   = f"https://{assigned_sub}.{_cfg.HTTP_TUNNEL_DOMAIN}"
+        public_url   = f"https://{assigned_sub}.{_cfg.get_http_domain()}"
         toml = _toml.generate_http_config(
             local_host=local_host, local_port=local_port,
             subdomain=assigned_sub, proxy_name=proxy_name,
@@ -218,6 +218,7 @@ def main() -> None:
         print("    status      Show PortX system status")
         print("    watchdog    Manage the boot-time auto-start service")
         print("    api         Set auth token or show config")
+        print("    config      View or change PortX settings (server, domains, API URL)")
         print("    cleanup     Clean up orphaned tunnel files")
         print("    uninstall   Complete system uninstall of PortX\n")
         print("  Run 'portx <command> --help' for more information on a command.")
@@ -405,6 +406,40 @@ def main() -> None:
         help="Auth token to save, or 'ls' to display current config",
     )
 
+    # --- CONFIG ---
+    p_config = subparsers.add_parser(
+        "config",
+        help="View or change PortX settings (server host, domains, API URL, etc.)",
+        description=(
+            "Manage PortX client configuration.\n\n"
+            "  portx config ls                  Show all current settings and sources\n"
+            "  portx config set <key> <value>   Set a specific configuration value\n"
+            "  portx config reset               Reset all overrides to defaults\n\n"
+            "Configurable keys:\n"
+            "  frps_host    Server hostname for the FRP relay\n"
+            "  frps_port    TCP port frps listens on (default 7000)\n"
+            "  api_url      PortX coordination API URL\n"
+            "  http_domain  Wildcard domain for HTTP tunnels\n"
+            "  tcp_domain   Hostname for TCP tunnels\n"
+            "  udp_domain   Hostname for UDP tunnels\n"
+            "  auth_token   Your PortX authentication token\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_config.add_argument(
+        "subcommand",
+        nargs="?",
+        choices=["ls", "set", "reset"],
+        metavar="ls|set|reset",
+        help="ls (list), set <key> <value>, or reset",
+    )
+    p_config.add_argument(
+        "args",
+        nargs="*",
+        metavar="<key> <value>",
+        help="For 'set': key and value to configure",
+    )
+
     args = parser.parse_args()
 
     try:
@@ -467,6 +502,19 @@ def main() -> None:
                 _cmds.cmd_api_ls()
             else:
                 _cmds.cmd_api_set(sub)
+        elif args.command == "config":
+            sub = getattr(args, "subcommand", None)
+            extra = getattr(args, "args", [])
+            if sub is None or sub == "ls":
+                _cmds.cmd_config_ls()
+            elif sub == "set":
+                if len(extra) < 2:
+                    _err("Usage: portx config set <key> <value>")
+                _cmds.cmd_config_set(extra[0], extra[1])
+            elif sub == "reset":
+                _cmds.cmd_config_reset()
+            else:
+                _err("Usage: portx config ls | set <key> <value> | reset")
     except KeyboardInterrupt:
         print("\n")
         sys.exit(0)

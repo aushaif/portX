@@ -78,6 +78,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cp "$SCRIPT_DIR/portx_server.py" "$PORTX_DIR/"
 cp "$SCRIPT_DIR/frps.toml"       "$PORTX_DIR/"
 
+# Copy central config file if present (one directory up = project root)
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [ -f "$REPO_ROOT/portx.config.json" ]; then
+  cp "$REPO_ROOT/portx.config.json" "$PORTX_DIR/"
+  ok "portx.config.json installed at $PORTX_DIR"
+fi
+
 mkdir -p /var/log/frps
 ok "PortX server files installed at $PORTX_DIR"
 

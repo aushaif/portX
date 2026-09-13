@@ -25,24 +25,26 @@
 5. **Zero-Downtime Hot Reloads:**
    Update tunnel parameters or switch ports interactively (`portx edit` and `portx reload`) without losing your reserved public URL or dropping healthy connections.
 6. **Zero External Python Dependencies:**
-   Built purely on Python 3.12+ standard library with official FRP (Fast Reverse Proxy) binaries downloaded directly from GitHub Releases.
+   Built purely on standard library Python (3.9+) with official, high-performance FRP (Fast Reverse Proxy) binaries. When installed via Homebrew, it leverages the official, pre-built `frpc` formula for an instant, lightweight installation.
 
 ---
 
 ## 2. Quickstart & Installation
 
-### Option A: Universal Installer (Recommended)
-One command for **macOS** and **Linux** (automatically configures Python 3.12+ and installs FRP):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install.sh | bash
-```
-
-### Option B: Homebrew (macOS & Linux)
-One-command installation via custom tap:
+### Option A: Homebrew (macOS & Linux — Recommended)
+Install PortX and the official pre-built `frpc` dependency in seconds via custom tap:
 
 ```bash
 brew install aushaif/portx/portx
+```
+
+> **Fast & Bottled:** Leverages Homebrew's official CDN-bottled `frpc` binary and system Python for an instant installation without compiling or manual binary downloads.
+
+### Option B: Universal Shell Installer
+One command for **macOS** and **Linux** (automatically configures runtime and downloads FRP):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aushaif/portX/main/scripts/install.sh | bash
 ```
 
 ### First-Time Authentication Setup
@@ -236,6 +238,24 @@ portx api your-token-here
 portx api ls
 ```
 
+### `portx config [ls|set|reset]`
+View or configure PortX server host, domains, and connection options. Settings resolve in priority:
+`~/.portx/config.toml` (user override) → Environment Variables → `portx.config.json` (central defaults) → Hardcoded constants.
+
+```bash
+# View all current settings and their origin source
+portx config ls
+
+# Override relay host or tunnel domains
+portx config set frps_host myvps.example.com
+portx config set http_domain example.com
+portx config set tcp_domain tcp.example.com
+portx config set udp_domain udp.example.com
+
+# Revert back to central project defaults (retains your auth token)
+portx config reset
+```
+
 ### `portx cleanup [--force]`
 Remove leftover temporary logs and orphaned configs.
 
@@ -374,7 +394,7 @@ When generating the PortX website, use this architectural layout:
    - Bold headline: *"Instant, Unbreakable Tunnels to Localhost."*
    - Subtitle: *"Expose HTTP, TCP, and UDP ports in seconds. Tunnels run in the background, survive network drops, and stay alive indefinitely."*
    - Interactive terminal / copyable curl command.
-   - Live badge: *"Python 3.12+ • Pure Stdlib • 90s Auto-Recovery"*.
+   - Live badge: *"Pure Python Stdlib • 90s Auto-Recovery • Instant Bottled Setup"*.
 3. **Interactive Terminal Component:**
    - Tabs for `HTTP Web App`, `Minecraft Server`, `SSH Remote Access`.
    - Realistic animated output showing URL generation.

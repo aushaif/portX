@@ -1,0 +1,38 @@
+{
+  "version": "1.0.0",
+  "repo": {
+    "owner": "aushaif",
+    "name": "portX",
+    "branch": "main",
+    "github_url": "https://github.com/aushaif/portX",
+    "raw_url": "https://raw.githubusercontent.com/aushaif/portX/main",
+    "installer_path": "installer/portx_install.py",
+    "install_script_path": "scripts/install.sh"
+  },
+  "server": {
+    "frps_host": "server.infinitynoob.lol",
+    "frps_port": 7000,
+    "frps_udp_port": 7001,
+    "api_host": "0.0.0.0",
+    "api_port": 8765,
+    "api_url": "http://server.infinitynoob.lol:8765"
+  },
+  "domains": {
+    "http": "infinitynoob.lol",
+    "tcp": "tcp.portx.infinitynoob.lol",
+    "udp": "udp.portx.infinitynoob.lol"
+  },
+  "ports": {
+    "tcp_pool_min": 30000,
+    "tcp_pool_max": 31999,
+    "udp_pool_min": 32000,
+    "udp_pool_max": 33999,
+    "custom_min": 1,
+    "custom_max": 65000
+  },
+  "timeouts": {
+    "api_timeout": 15,
+    "frpc_connect_timeout": 15,
+    "stale_heartbeat_timeout": 600
+  }
+}

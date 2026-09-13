@@ -1,7 +1,7 @@
 """
 Management commands for PortX background tunnels.
 Implements list, info, stop, remove, restart, reload, status, watchdog,
-cleanup, and uninstall.
+config, cleanup, and uninstall.
 """
 
 from __future__ import annotations
@@ -392,8 +392,8 @@ def cmd_edit(name: str) -> None:
     tunnel_id  = t.get("tunnel_id", "")
     proxy_name = t.get("proxy_name", "")
     public_url = t.get("public_url", "")
-    frps_host  = t.get("frps_host") or _cfg.FRPS_HOST
-    frps_port  = t.get("frps_port") or _cfg.FRPS_PORT
+    frps_host  = t.get("frps_host") or _cfg.get_frps_host()
+    frps_port  = t.get("frps_port") or _cfg.get_frps_port()
 
     if new_type in ("tcp", "udp"):
         if not (1 <= new_remote_port <= 65000):
@@ -423,12 +423,14 @@ def cmd_edit(name: str) -> None:
                 _api.release_tunnel(tunnel_id)
             tunnel_id   = info["tunnel_id"]
             proxy_name  = info["proxy_name"]
-            public_url  = info.get("public_url", f"{_cfg.TCP_TUNNEL_DOMAIN if new_type == 'tcp' else _cfg.UDP_TUNNEL_DOMAIN}:{new_remote_port}")
+            tcp_udp_domain = _cfg.get_tcp_domain() if new_type == 'tcp' else _cfg.get_udp_domain()
+            public_url  = info.get("public_url", f"{tcp_udp_domain}:{new_remote_port}")
             frps_host   = info.get("frps_host", frps_host)
             frps_port   = info.get("frps_port", frps_port)
         else:
             proxy_name  = proxy_name or f"portx-{new_type}-{new_remote_port}"
-            public_url  = f"{_cfg.TCP_TUNNEL_DOMAIN if new_type == 'tcp' else _cfg.UDP_TUNNEL_DOMAIN}:{new_remote_port}"
+            tcp_udp_domain = _cfg.get_tcp_domain() if new_type == 'tcp' else _cfg.get_udp_domain()
+            public_url  = f"{tcp_udp_domain}:{new_remote_port}"
 
     elif new_type == "http":
         if new_subdomain != subdomain or new_type != tunnel_type or new_local_host != local_host or new_local_port != local_port:
@@ -445,12 +447,12 @@ def cmd_edit(name: str) -> None:
             tunnel_id   = info["tunnel_id"]
             proxy_name  = info["proxy_name"]
             new_subdomain = info.get("subdomain", new_subdomain)
-            public_url  = f"https://{new_subdomain}.{_cfg.HTTP_TUNNEL_DOMAIN}"
+            public_url  = f"https://{new_subdomain}.{_cfg.get_http_domain()}"
             frps_host   = info.get("frps_host", frps_host)
             frps_port   = info.get("frps_port", frps_port)
         else:
             proxy_name  = proxy_name or f"portx-http-{new_subdomain}"
-            public_url  = f"https://{new_subdomain}.{_cfg.HTTP_TUNNEL_DOMAIN}"
+            public_url  = f"https://{new_subdomain}.{_cfg.get_http_domain()}"
 
     # 5. Stop worker if running
     was_running = _state.is_worker_locked(name) or t.get("status") in ("starting", "running", "reconnecting")
@@ -901,3 +903,111 @@ def cmd_cleanup(force: bool = False) -> None:
         if force and removed:
             print(f"    Records removed: {len(removed)}")
         print()
+
+
+# ---------------------------------------------------------------------------
+# Config management
+# ---------------------------------------------------------------------------
+
+def cmd_config_ls() -> None:
+    """Display all effective configuration values and their sources."""
+    import json as _json
+
+    cfg_file = _cfg.CONFIG_TOML
+    user_cfg = _cfg._load_config().get("portx", {})
+
+    # Determine source for each key
+    def _source(key: str) -> str:
+        if key in user_cfg:
+            return f"~/.portx/config.toml"
+        env_map = {
+            "frps_host":   "PORTX_FRPS_HOST",
+            "frps_port":   "PORTX_FRPS_PORT",
+            "api_url":     "PORTX_API_URL",
+            "http_domain": "PORTX_HTTP_DOMAIN",
+            "tcp_domain":  "PORTX_TCP_DOMAIN",
+            "udp_domain":  "PORTX_UDP_DOMAIN",
+        }
+        env = env_map.get(key)
+        if env and os.environ.get(env):
+            return f"env:{env}"
+        proj = _cfg._find_project_config()
+        if proj:
+            return str(proj)
+        return "built-in default"
+
+    # Collect all values + sources
+    rows = []
+    for key, (desc, _section) in _cfg.CONFIG_KEYS.items():
+        val = _cfg.get_all_config()[key]
+        src = _source(key)
+        rows.append((key, val, desc, src))
+
+    # Also display project config file location
+    proj_cfg = _cfg._find_project_config()
+
+    print()
+    print("  PortX Configuration")
+    print("  ─────────────────────────────────────────")
+    print(f"  User config:    {cfg_file}")
+    print(f"  Project config: {proj_cfg or '(not found)'}")
+    print()
+    print(f"  {'KEY':<15}  {'VALUE':<40}  SOURCE")
+    print(f"  {'─'*15}  {'─'*40}  {'─'*30}")
+    for key, val, _desc, src in rows:
+        display_val = val if len(val) <= 40 else val[:37] + "..."
+        print(f"  {key:<15}  {display_val:<40}  {src}")
+    print()
+    print("  Use 'portx config set <key> <value>' to override any setting.")
+    print("  Use 'portx config reset' to remove all user overrides.")
+    print()
+    print("  Available keys:")
+    for key, (desc, _) in _cfg.CONFIG_KEYS.items():
+        print(f"    {key:<15}  {desc}")
+    print()
+
+
+def cmd_config_set(key: str, value: str) -> None:
+    """Set a configuration key in ~/.portx/config.toml."""
+    key = key.strip()
+    value = value.strip()
+
+    if not key:
+        print("\n  ✗ Key cannot be empty.\n", file=sys.stderr)
+        sys.exit(1)
+
+    if key not in _cfg.CONFIG_KEYS:
+        print(f"\n  ✗ Unknown config key: '{key}'", file=sys.stderr)
+        print(f"\n  Valid keys:", file=sys.stderr)
+        for k, (desc, _) in _cfg.CONFIG_KEYS.items():
+            print(f"    {k:<15}  {desc}", file=sys.stderr)
+        print()
+        sys.exit(1)
+
+    if not value:
+        print(f"\n  ✗ Value cannot be empty. To reset, use: portx config reset\n",
+              file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        _cfg.set_config_key(key, value)
+    except (ValueError, TypeError) as exc:
+        print(f"\n  ✗ Invalid value: {exc}\n", file=sys.stderr)
+        sys.exit(1)
+
+    # Mask auth tokens for display
+    display_val = value if key != "auth_token" else value[:6] + "*" * max(0, len(value)-6)
+    print(f"\n  ✓ Set {key} = {display_val}")
+    print(f"  Saved to: {_cfg.CONFIG_TOML}\n")
+    print("  Note: already-running tunnels will pick this up on next restart/reload.\n")
+
+
+def cmd_config_reset() -> None:
+    """Reset all user config overrides (keeps auth token)."""
+    _cfg.reset_config()
+    print()
+    print("  ✓ Config reset — all overrides removed from ~/.portx/config.toml.")
+    print("  ✓ Auth token was preserved.")
+    print()
+    print("  Settings now fall back to portx.config.json / built-in defaults.")
+    print()

@@ -126,7 +126,9 @@ else
 fi
 
 # ── Download and run the Python installer ────────────────────────────────
-INSTALLER_URL="https://raw.githubusercontent.com/aushaif/portX/main/installer/portx_install.py"
+PORTX_REPO="${PORTX_REPO:-aushaif/portX}"
+PORTX_BRANCH="${PORTX_BRANCH:-main}"
+INSTALLER_URL="${PORTX_INSTALLER_URL:-https://raw.githubusercontent.com/${PORTX_REPO}/${PORTX_BRANCH}/installer/portx_install.py}"
 TMP_SCRIPT="$(mktemp "${TMPDIR:-/tmp}/portx_install_XXXXXX.py")"
 
 cleanup() { rm -f "$TMP_SCRIPT"; }

@@ -209,8 +209,8 @@ def _regenerate_config(info: dict) -> None:
     local_host  = tunnel.get("local_host", "127.0.0.1")
     local_port  = int(tunnel.get("local_port", 0))
     config_path = Path(tunnel["frp_config_path"])
-    frps_host   = info.get("frps_host", _cfg.FRPS_HOST)
-    frps_port   = info.get("frps_port", _cfg.FRPS_PORT)
+    frps_host   = info.get("frps_host", _cfg.get_frps_host())
+    frps_port   = info.get("frps_port", _cfg.get_frps_port())
     proxy_name  = info.get("proxy_name", "")
 
     if t == "http":

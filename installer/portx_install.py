@@ -29,9 +29,6 @@ from pathlib import Path
 # Constants
 # ---------------------------------------------------------------------------
 
-FRP_GITHUB_API = "https://api.github.com/repos/fatedier/frp/releases/latest"
-PORTX_GITHUB_TAR = "https://github.com/aushaif/portX/archive/refs/heads/main.tar.gz"
-
 PORTX_DIR      = Path.home() / ".portx"
 BIN_DIR        = PORTX_DIR / "bin"
 FRP_PATH       = BIN_DIR / "frpc"
@@ -39,6 +36,36 @@ LOCAL_BIN_DIR  = Path.home() / ".local" / "bin"
 PORTX_EXECUTABLE = LOCAL_BIN_DIR / "portx"
 
 NETWORK_TIMEOUT = 30
+
+FRP_GITHUB_API = "https://api.github.com/repos/fatedier/frp/releases/latest"
+
+# Default repo info, overridable by portx.config.json or environment variables
+_repo_owner  = "aushaif"
+_repo_name   = "portX"
+_repo_branch = "main"
+
+for _candidate in [
+    Path(__file__).resolve().parent.parent / "portx.config.json",
+    PORTX_DIR / "portx.config.json",
+    Path.cwd() / "portx.config.json",
+]:
+    if _candidate.is_file():
+        try:
+            with open(_candidate, "r", encoding="utf-8") as _f:
+                _data = json.load(_f).get("repo", {})
+                _repo_owner  = _data.get("owner", _repo_owner)
+                _repo_name   = _data.get("name", _repo_name)
+                _repo_branch = _data.get("branch", _repo_branch)
+                break
+        except Exception:
+            pass
+
+PORTX_REPO       = os.environ.get("PORTX_REPO", f"{_repo_owner}/{_repo_name}")
+PORTX_BRANCH     = os.environ.get("PORTX_BRANCH", _repo_branch)
+PORTX_GITHUB_TAR = os.environ.get(
+    "PORTX_GITHUB_TAR",
+    f"https://github.com/{PORTX_REPO}/archive/refs/heads/{PORTX_BRANCH}.tar.gz",
+)
 
 PLATFORM_MAP: dict[tuple[str, str], str] = {
     ("darwin", "arm64"):   "darwin_arm64",
@@ -209,10 +236,16 @@ def install_portx_cli() -> None:
         # Copy all CLI modules
         for py_file in cli_dir.glob("*.py"):
             shutil.copy2(py_file, lib_dir / py_file.name)
-        
+
+        # Install portx.config.json to ~/.portx/ so CLI can load default settings
+        cfg_src = extracted_dir / "portx.config.json"
+        if cfg_src.exists():
+            PORTX_DIR.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(cfg_src, PORTX_DIR / "portx.config.json")
+
         # Create the executable wrapper (this will also create LOCAL_BIN_DIR)
         create_executable_wrapper(PORTX_EXECUTABLE, lib_dir)
-        
+
     _success("PortX CLI installed to ~/.local/bin/portx")
 
 
