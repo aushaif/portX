@@ -44,17 +44,17 @@ Usage:
 Environment variables (all optional):
   PORTX_API_HOST       Bind address          (default: 0.0.0.0)
   PORTX_API_PORT       API listen port       (default: 8765)
-  PORTX_FRPS_HOST      frps hostname         (default: portx.infinitynoob.lol)
+  PORTX_FRPS_HOST      frps hostname         (default: server.infinitynoob.lol)
   PORTX_FRPS_PORT      frps bind port        (default: 7000)
-  PORTX_HTTP_DOMAIN    Wildcard HTTP domain  (default: portx.infinitynoob.lol)
-  PORTX_TCP_DOMAIN     TCP tunnel hostname   (default: tcp.portx.infinitynoob.lol)
-  PORTX_UDP_DOMAIN     UDP tunnel hostname   (default: udp.portx.infinitynoob.lol)
+  PORTX_HTTP_DOMAIN    Wildcard HTTP domain  (default: infinitynoob.lol)
+  PORTX_TCP_DOMAIN     TCP tunnel hostname   (default: server.infinitynoob.lol)
+  PORTX_UDP_DOMAIN     UDP tunnel hostname   (default: server.infinitynoob.lol)
   PORTX_TCP_PORT_MIN   TCP port pool start   (default: 30000)
   PORTX_TCP_PORT_MAX   TCP port pool end     (default: 31999)
   PORTX_UDP_PORT_MIN   UDP port pool start   (default: 32000)
   PORTX_UDP_PORT_MAX   UDP port pool end     (default: 33999)
   PORTX_STATE_FILE     Path for persistent allocation state
-                       (default: /opt/portx/state.json)
+                       (default: /opt/portx/state.json with fallback)
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ import shutil
 import threading
 import time
 import uuid
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -83,8 +83,10 @@ from typing import Any
 def _load_project_cfg() -> dict:
     """Search for portx.config.json in standard locations."""
     candidates = [
-        Path(__file__).resolve().parent.parent / "portx.config.json",  # dev / git clone
-        Path("/opt/portx/portx.config.json"),                           # VPS install
+        Path(__file__).resolve().parent / "portx.config.json",          # same dir as server script
+        Path(__file__).resolve().parent.parent / "portx.config.json",   # dev / git clone
+        Path("/opt/portx/portx.config.json"),                            # VPS install /opt/portx
+        Path("/opt/frp/portx.config.json"),                              # VPS install /opt/frp
     ]
     for p in candidates:
         if p.exists():
@@ -111,16 +113,16 @@ API_PORT = int(os.environ.get("PORTX_API_PORT",
     str(_pcfg("server", "api_port", 8765))))
 
 FRPS_HOST = os.environ.get("PORTX_FRPS_HOST",
-    str(_pcfg("server", "frps_host", "portx.infinitynoob.lol")))
+    str(_pcfg("server", "frps_host", "server.infinitynoob.lol")))
 FRPS_PORT = int(os.environ.get("PORTX_FRPS_PORT",
     str(_pcfg("server", "frps_port", 7000))))
 
 HTTP_DOMAIN = os.environ.get("PORTX_HTTP_DOMAIN",
     str(_pcfg("domains", "http", "infinitynoob.lol")))
 TCP_DOMAIN  = os.environ.get("PORTX_TCP_DOMAIN",
-    str(_pcfg("domains", "tcp", "tcp.portx.infinitynoob.lol")))
+    str(_pcfg("domains", "tcp", "server.infinitynoob.lol")))
 UDP_DOMAIN  = os.environ.get("PORTX_UDP_DOMAIN",
-    str(_pcfg("domains", "udp", "udp.portx.infinitynoob.lol")))
+    str(_pcfg("domains", "udp", "server.infinitynoob.lol")))
 
 TCP_PORT_MIN = int(os.environ.get("PORTX_TCP_PORT_MIN",
     str(_pcfg("ports", "tcp_pool_min", 30000))))
@@ -144,7 +146,22 @@ STALE_TIMEOUT = int(os.environ.get("PORTX_STALE_TIMEOUT",
     str(_pcfg("timeouts", "stale_heartbeat_timeout", 10 * 60))))
 
 # Path for persistent allocation state — survives server restarts
-STATE_FILE = Path(os.environ.get("PORTX_STATE_FILE", "/opt/portx/state.json"))
+def _get_state_file() -> Path:
+    env_path = os.environ.get("PORTX_STATE_FILE")
+    if env_path:
+        return Path(env_path)
+    try:
+        opt_portx = Path("/opt/portx")
+        opt_portx.mkdir(parents=True, exist_ok=True)
+        test_file = opt_portx / ".write_test"
+        test_file.touch()
+        test_file.unlink()
+        return opt_portx / "state.json"
+    except Exception:
+        pass
+    return Path(__file__).resolve().parent / "state.json"
+
+STATE_FILE = _get_state_file()
 
 SUBDOMAIN_LEN   = 6
 SUBDOMAIN_CHARS = string.ascii_lowercase + string.digits
@@ -598,6 +615,7 @@ _allocator = TunnelAllocator()
 # ---------------------------------------------------------------------------
 
 class PortXHandler(BaseHTTPRequestHandler):
+    timeout = 15.0  # Socket timeout in seconds to prevent hung connections
 
     # ── Silence default access log — we use our own ───────────────────────
     def log_message(self, fmt: str, *args: Any) -> None:
@@ -731,8 +749,12 @@ class PortXHandler(BaseHTTPRequestHandler):
     # ── GET (health, tunnel info) ─────────────────────────────────────────
 
     def do_GET(self) -> None:
-        if self.path == "/health":
-            self._send_json(200, {"status": "ok", "tunnels": len(_allocator._tunnels)})
+        if self.path in ("/health", "/api/v1/health", "/"):
+            self._send_json(200, {
+                "status": "ok",
+                "tunnels": len(_allocator._tunnels),
+                "frps_host": FRPS_HOST,
+            })
             return
 
         m = re.fullmatch(r"/api/v1/tunnel/([0-9a-f-]+)", self.path)
@@ -806,7 +828,8 @@ def main() -> None:
     reaper = threading.Thread(target=_stale_reaper_loop, daemon=True, name="stale-reaper")
     reaper.start()
 
-    server = HTTPServer((API_HOST, API_PORT), PortXHandler)
+    server = ThreadingHTTPServer((API_HOST, API_PORT), PortXHandler)
+    server.daemon_threads = True
     log.info("Listening on %s:%d", API_HOST, API_PORT)
     try:
         server.serve_forever()

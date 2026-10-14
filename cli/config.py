@@ -191,11 +191,11 @@ def get_http_domain() -> str:
 
 def get_tcp_domain() -> str:
     return _get("portx", "tcp_domain", "PORTX_TCP_DOMAIN",
-                "domains", "tcp", "tcp.portx.infinitynoob.lol")
+                "domains", "tcp", "server.infinitynoob.lol")
 
 def get_udp_domain() -> str:
     return _get("portx", "udp_domain", "PORTX_UDP_DOMAIN",
-                "domains", "udp", "udp.portx.infinitynoob.lol")
+                "domains", "udp", "server.infinitynoob.lol")
 
 def get_auth_token() -> str:
     """

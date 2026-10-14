@@ -19,8 +19,8 @@
   },
   "domains": {
     "http": "infinitynoob.lol",
-    "tcp": "tcp.portx.infinitynoob.lol",
-    "udp": "udp.portx.infinitynoob.lol"
+    "tcp": "server.infinitynoob.lol",
+    "udp": "server.infinitynoob.lol"
   },
   "ports": {
     "tcp_pool_min": 30000,
