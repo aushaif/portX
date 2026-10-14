@@ -339,6 +339,11 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGUSR1, _reload)
+    # Ignore SIGHUP — prevents the worker from dying when the user closes their
+    # terminal window. Even with start_new_session=True, some macOS terminal
+    # emulators forward SIGHUP to child processes. Ignoring it makes the worker
+    # completely immune to terminal closure.
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
 
     # Load initial tunnel state
     tunnel = _state.get_tunnel(_tunnel_name)

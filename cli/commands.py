@@ -74,7 +74,8 @@ def _spawn_worker(name: str) -> None:
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        start_new_session=True,  # Detach completely
+        start_new_session=True,  # Detach from terminal (calls setsid internally)
+        close_fds=True,          # Don't inherit open file descriptors from CLI
     )
 
     _state.update_tunnel(name, pid=proc.pid)

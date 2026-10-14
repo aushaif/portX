@@ -104,6 +104,8 @@ def main() -> None:
 
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
+    # Ignore SIGHUP — keeps the watchdog alive when the controlling terminal closes
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
 
     # Ensure log directory exists
     _state.LOGS_DIR.mkdir(parents=True, exist_ok=True)
