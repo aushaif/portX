@@ -6,6 +6,7 @@ config, cleanup, and uninstall.
 
 from __future__ import annotations
 
+import concurrent.futures
 import os
 import shutil
 import signal
@@ -703,32 +704,49 @@ def cmd_watchdog_status() -> None:
 def _kill_all_portx_processes() -> None:
     """Kill every frpc and portx worker process on the system, regardless of state."""
     targets = ["worker.py", str(Path.home() / ".portx" / "bin" / "frpc"), "frpc", "watchdog.py"]
-    killed = 0
+    pids_to_kill: set[int] = set()
+    my_pid = os.getpid()
+
     for pattern in targets:
         try:
             result = subprocess.run(
                 ["pgrep", "-f", pattern],
-                capture_output=True, text=True
+                capture_output=True, text=True, timeout=2.0
             )
             for pid_str in result.stdout.strip().splitlines():
                 try:
                     pid = int(pid_str.strip())
-                    if pid == os.getpid():
-                        continue  # never kill ourselves
-                    try:
-                        os.kill(pid, signal.SIGTERM)
-                        killed += 1
-                    except OSError:
-                        pass
+                    if pid != my_pid:
+                        pids_to_kill.add(pid)
                 except ValueError:
                     pass
-        except FileNotFoundError:
-            pass  # pgrep not available
-        except Exception:
+        except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
             pass
 
-    if killed:
-        time.sleep(0.8)  # give processes time to die
+    if not pids_to_kill:
+        print("  ✓ No lingering PortX processes found.")
+        return
+
+    # Signal SIGTERM to all found processes
+    for pid in pids_to_kill:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+
+    # Give processes a brief moment to exit gracefully
+    time.sleep(0.3)
+
+    # Force kill (SIGKILL) any that refused to terminate
+    killed = 0
+    for pid in pids_to_kill:
+        if _state.is_pid_alive(pid):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+        killed += 1
+
     print(f"  ✓ Terminated {killed} background process(es).")
 
 
@@ -764,17 +782,17 @@ def cmd_uninstall() -> None:
     print("  → Killing all PortX background processes...")
     _kill_all_portx_processes()
 
-    # 4. Stop tunnels and release allocations
+    # 4. Stop tunnels and release allocations (parallel, short timeout)
     try:
         tunnels = _state.list_tunnels()
         if tunnels:
-            print("  → Releasing tunnel allocations...")
-            for name, t in list(tunnels.items()):
-                _kill_worker(name, t)
-                tunnel_id = t.get("tunnel_id")
-                if tunnel_id:
-                    _api.release_tunnel(tunnel_id)
-            print("  ✓ Allocations released.")
+            tunnel_ids = [t.get("tunnel_id") for t in tunnels.values() if t.get("tunnel_id")]
+            if tunnel_ids:
+                print("  → Releasing tunnel allocations...")
+                with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(tunnel_ids))) as executor:
+                    futures = [executor.submit(_api.release_tunnel, tid, 2.0) for tid in tunnel_ids]
+                    concurrent.futures.wait(futures, timeout=2.5)
+                print("  ✓ Allocations released.")
     except Exception:
         pass
 

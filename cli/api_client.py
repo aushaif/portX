@@ -59,7 +59,7 @@ class APIError(Exception):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _request(method: str, path: str, body: dict | None = None) -> dict | None:
+def _request(method: str, path: str, body: dict | None = None, timeout: float | None = None) -> dict | None:
     api_url = _cfg.get_api_url()
     url = f"{api_url}{path}"
     data = json.dumps(body).encode() if body is not None else None
@@ -74,8 +74,9 @@ def _request(method: str, path: str, body: dict | None = None) -> dict | None:
 
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
 
+    req_timeout = timeout if timeout is not None else _cfg.API_TIMEOUT
     try:
-        with urllib.request.urlopen(req, timeout=_cfg.API_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=req_timeout) as resp:
             raw = resp.read()
             if raw:
                 return json.loads(raw.decode())
@@ -129,13 +130,13 @@ def request_tunnel(
     return result
 
 
-def release_tunnel(tunnel_id: str) -> None:
+def release_tunnel(tunnel_id: str, timeout: float | None = 3.0) -> None:
     """
     Notify the server that a tunnel has been permanently closed.
     Best-effort: errors are silently ignored so cleanup never blocks exit.
     """
     try:
-        _request("DELETE", f"/api/v1/tunnel/{tunnel_id}")
+        _request("DELETE", f"/api/v1/tunnel/{tunnel_id}", timeout=timeout)
     except Exception:
         pass
 

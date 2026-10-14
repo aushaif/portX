@@ -195,8 +195,14 @@ def _install_macos() -> str:
 
 def _uninstall_macos() -> str:
     if _LAUNCHD_PLIST.exists():
-        subprocess.run(["launchctl", "unload", "-w", str(_LAUNCHD_PLIST)], capture_output=True)
-        _LAUNCHD_PLIST.unlink()
+        try:
+            subprocess.run(["launchctl", "unload", "-w", str(_LAUNCHD_PLIST)], capture_output=True, timeout=4.0)
+        except Exception:
+            pass
+        try:
+            _LAUNCHD_PLIST.unlink()
+        except OSError:
+            pass
         return f"macOS System LaunchDaemon removed: {_LAUNCHD_PLIST}"
     return "macOS LaunchDaemon was not installed."
 
@@ -247,8 +253,17 @@ WantedBy=multi-user.target
 
 def _uninstall_linux() -> str:
     if _SYSTEMD_SERVICE.exists():
-        subprocess.run(["systemctl", "disable", "--now", "portx-watchdog"], capture_output=True)
-        _SYSTEMD_SERVICE.unlink()
-        subprocess.run(["systemctl", "daemon-reload"], capture_output=True)
+        try:
+            subprocess.run(["systemctl", "disable", "--now", "portx-watchdog"], capture_output=True, timeout=4.0)
+        except Exception:
+            pass
+        try:
+            _SYSTEMD_SERVICE.unlink()
+        except OSError:
+            pass
+        try:
+            subprocess.run(["systemctl", "daemon-reload"], capture_output=True, timeout=4.0)
+        except Exception:
+            pass
         return f"Linux systemd daemon removed: {_SYSTEMD_SERVICE}"
     return "Linux systemd daemon was not installed."
