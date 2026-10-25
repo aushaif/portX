@@ -115,7 +115,7 @@ All settings are stored in `~/.portx/config.toml`:
 
 ```toml
 [portx]
-api_url    = "http://portx.infinitynoob.lol:8765"
+api_url    = "http://server.infinitynoob.lol:8765"
 auth_token = "your-token-here"
 ```
 

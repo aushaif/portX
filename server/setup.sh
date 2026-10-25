@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # PortX VPS Setup Script — v2.1
-# Run this ONCE on your VPS (portx.infinitynoob.lol) to deploy frps + PortX server.
+# Run this ONCE on your VPS (server.infinitynoob.space) to deploy frps + PortX server.
 #
 # Changes from v2.0:
 #   • Restart=always (was on-failure) — restarts on ANY exit, including code 0
@@ -143,7 +143,7 @@ StartLimitIntervalSec=60
 
 # Environment — uncomment and customize as needed:
 # Environment="PORTX_API_PORT=8765"
-# Environment="PORTX_FRPS_HOST=portx.infinitynoob.lol"
+# Environment="PORTX_FRPS_HOST=server.infinitynoob.space"
 # Environment="PORTX_FRPS_PORT=7000"
 # Environment="PORTX_STATE_FILE=/opt/portx/state.json"
 

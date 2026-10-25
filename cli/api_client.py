@@ -12,12 +12,12 @@ API contract:
 
                -- HTTP only --
                "subdomain": str,
-               "public_url": str,               e.g. "https://x7k29m.portx.infinitynoob.lol"
+               "public_url": str,               e.g. "https://x7k29m.infinitynoob.space"
 
                -- TCP/UDP only --
                "remote_port": int,
-               "public_host": str,              e.g. "tcp.portx.infinitynoob.lol"
-               "public_url":  str,              e.g. "tcp.portx.infinitynoob.lol:30125"
+               "public_host": str,              e.g. "infinitynoob.space"
+               "public_url":  str,              e.g. "infinitynoob.space:30125"
 
                -- always present --
                "frps_host": str,

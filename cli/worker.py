@@ -224,12 +224,14 @@ def _regenerate_config(info: dict) -> None:
             local_host=local_host, local_port=local_port,
             remote_port=int(info.get("remote_port", tunnel.get("remote_port", 0))),
             proxy_name=proxy_name, frps_host=frps_host, frps_port=frps_port,
+            proxy_protocol=tunnel.get("proxy_protocol"),
         )
     else:
         toml = _toml.generate_udp_config(
             local_host=local_host, local_port=local_port,
             remote_port=int(info.get("remote_port", tunnel.get("remote_port", 0))),
             proxy_name=proxy_name, frps_host=frps_host, frps_port=frps_port,
+            proxy_protocol=tunnel.get("proxy_protocol"),
         )
 
     config_path.write_text(toml, "utf-8")

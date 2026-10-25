@@ -144,6 +144,10 @@ def cmd_info(name: str) -> None:
     if reconnecting:
         print(f"  Last error:  {t.get('error', 'none')}")
     print(f"  Auto-start:  {auto_start}")
+    if t.get("type") in ("tcp", "udp"):
+        pp = t.get("proxy_protocol")
+        pp_display = f"{pp.upper()} (Real client IP forwarding)" if pp else "Disabled"
+        print(f"  Proxy Proto: {pp_display}")
     print(f"  PID:         {t.get('pid', 'N/A')}")
     print(f"  Config:      {t.get('frp_config_path', 'N/A')}")
     print(f"  Log:         {t.get('log_path', 'N/A')}")
@@ -312,11 +316,12 @@ def cmd_edit(name: str) -> None:
         sys.exit(1)
 
     # 1. Create a temporary edit file with the current config
-    tunnel_type  = t.get("type", "http")
-    local_host   = t.get("local_host", "127.0.0.1")
-    local_port   = t.get("local_port", 8080)
-    subdomain    = t.get("subdomain", "")
-    remote_port  = t.get("remote_port", 0)
+    tunnel_type    = t.get("type", "http")
+    local_host     = t.get("local_host", "127.0.0.1")
+    local_port     = t.get("local_port", 8080)
+    subdomain      = t.get("subdomain", "")
+    remote_port    = t.get("remote_port", 0)
+    proxy_protocol = t.get("proxy_protocol", "")
 
     edit_content = [
         "# ---------------------------------------------------------",
@@ -340,6 +345,7 @@ def cmd_edit(name: str) -> None:
         edit_content += [
             f'remotePort = {remote_port if remote_port else 0}',
             f'# subdomain = "{subdomain}"',
+            f'proxy_protocol = "{proxy_protocol}"  # options: "v2", "v1", or "" (enables real player IP forwarding for Minecraft)',
         ]
     edit_content.append("")
 
@@ -358,6 +364,7 @@ def cmd_edit(name: str) -> None:
     new_local_port = local_port
     new_subdomain = subdomain
     new_remote_port = remote_port
+    new_proxy_protocol = proxy_protocol
 
     try:
         content = Path(tmp_path).read_text("utf-8")
@@ -381,13 +388,16 @@ def cmd_edit(name: str) -> None:
                     new_subdomain = val
                 elif key in ("remotePort", "remote_port") and val.isdigit():
                     new_remote_port = int(val)
+                elif key == "proxy_protocol":
+                    new_proxy_protocol = val.lower() if val.lower() in ("v1", "v2") else ""
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
     # 4. Check if anything changed
     if (new_name == name and new_type == tunnel_type and 
         new_local_host == local_host and new_local_port == local_port and
-        new_subdomain == subdomain and new_remote_port == remote_port):
+        new_subdomain == subdomain and new_remote_port == remote_port and
+        new_proxy_protocol == proxy_protocol):
         print("\n  ✓ No changes made.\n")
         return
 
@@ -498,12 +508,14 @@ def cmd_edit(name: str) -> None:
             local_host=new_local_host, local_port=int(new_local_port),
             remote_port=int(new_remote_port), proxy_name=new_proxy_name,
             frps_host=frps_host, frps_port=int(frps_port),
+            proxy_protocol=new_proxy_protocol or None,
         )
     else:  # udp
         toml = _toml.generate_udp_config(
             local_host=new_local_host, local_port=int(new_local_port),
             remote_port=int(new_remote_port), proxy_name=new_proxy_name,
             frps_host=frps_host, frps_port=int(frps_port),
+            proxy_protocol=new_proxy_protocol or None,
         )
 
     new_config_path.write_text(toml, "utf-8")
@@ -521,6 +533,7 @@ def cmd_edit(name: str) -> None:
         proxy_name=new_proxy_name,
         subdomain=new_subdomain if new_type == "http" else None,
         remote_port=int(new_remote_port) if new_type in ("tcp", "udp") else None,
+        proxy_protocol=new_proxy_protocol or "",
         frp_config_path=str(new_config_path),
         log_path=str(new_log_path),
         tunnel_id=tunnel_id,
@@ -1093,3 +1106,157 @@ def _sync_all_existing_tunnels(restart_running: bool = True) -> int:
                     _spawn_worker(name)
 
     return updated
+
+
+def cmd_proxy_protocol(name: str | None, action: str = "status", apply_all: bool = False) -> None:
+    """
+    Manage PROXY protocol (client real-IP forwarding) for TCP and UDP tunnels.
+
+    Supported:
+    - TCP tunnels (Minecraft Java): Paper/Purpur/Velocity/Fabric
+    - UDP tunnels (Minecraft Bedrock / GeyserMC): GeyserMC with enable-proxy-protocol: true
+    """
+    if apply_all or name in ("--all", "all"):
+        tunnels = _state.list_tunnels()
+        supported_tunnels = {k: v for k, v in tunnels.items() if v.get("type") in ("tcp", "udp")}
+        if not supported_tunnels:
+            print("\n  No TCP or UDP tunnels found.\n")
+            return
+
+        action_norm = (action or "status").strip().lower()
+        if action_norm == "status":
+            print("\n  PROXY Protocol Status for all tunnels:\n")
+            for t_name, t_data in supported_tunnels.items():
+                ttype = t_data.get("type", "").upper()
+                pp = _toml.normalize_proxy_protocol(t_data.get("proxy_protocol"))
+                status_str = f"Enabled ({pp.upper()})" if pp else "Disabled"
+                print(f"  • {t_name:<16} [{ttype}] {status_str}")
+            print()
+            return
+
+        for t_name in supported_tunnels:
+            cmd_proxy_protocol(t_name, action=action, apply_all=False)
+        return
+
+    if not name:
+        print("\n  ✗ Specify a tunnel name or use --all.\n")
+        sys.exit(1)
+
+    t = _state.get_tunnel(name)
+    if not t:
+        print(f"\n  ✗ Tunnel '{name}' not found.\n")
+        sys.exit(1)
+
+    t_type = t.get("type", "")
+    if t_type not in ("tcp", "udp"):
+        print(f"\n  ✗ Tunnel '{name}' is of type '{t_type}'. PROXY protocol is only supported for TCP and UDP tunnels.\n")
+        sys.exit(1)
+
+    current_pp = _toml.normalize_proxy_protocol(t.get("proxy_protocol"))
+    action_norm = (action or "status").strip().lower()
+
+    if action_norm == "status":
+        print(f"\n  PROXY Protocol Status for '{name}' [{t_type.upper()}]:")
+        if current_pp:
+            print(f"  ✓ Enabled ({current_pp.upper()}) — frpc injects real player IP headers.")
+            print()
+            print("  ⚠ IMPORTANT: Your server/proxy MUST also be configured to")
+            print("    parse PROXY protocol headers, or players cannot join and IPs")
+            print("    will show as your local network IP.")
+            print()
+            if t_type == "tcp":
+                print("  Required Minecraft Java Configuration:")
+                print("  • Paper / Purpur: Set 'proxies.proxy-protocol: true' in config/paper-global.yml")
+                print("  • Velocity:       Set 'haproxy-protocol = true' in velocity.toml")
+                print("  • Fabric:         Install the 'proxy-protocol-support' mod")
+            else:
+                print("  Required Minecraft Bedrock / GeyserMC Configuration:")
+                print("  • GeyserMC:       Set 'enable-proxy-protocol: true' under 'bedrock:'")
+                print("                    in plugins/Geyser-Spigot/config.yml")
+            print()
+            print("  To disable (restore normal operation):")
+            print(f"    portx real-ip {name} off\n")
+        else:
+            print("  ✗ Disabled — backend server sees connections from local IP.")
+            print(f"  To enable real player IPs, run:")
+            print(f"    portx real-ip {name} on")
+            if t_type == "tcp":
+                print("  Then set 'proxies.proxy-protocol: true' in config/paper-global.yml.\n")
+            else:
+                print("  Then set 'bedrock.enable-proxy-protocol: true' in Geyser config.yml.\n")
+        return
+
+    new_pp = None
+    if action_norm in ("on", "enable", "v2", "true", "yes"):
+        new_pp = "v2"
+    elif action_norm in ("v1", "1"):
+        new_pp = "v1"
+    elif action_norm in ("off", "disable", "false", "no"):
+        new_pp = None
+    else:
+        print(f"\n  ✗ Unknown action: '{action}'. Choices: on, off, v2, v1, status.\n")
+        sys.exit(1)
+
+    if new_pp == current_pp:
+        state_str = f"enabled ({new_pp.upper()})" if new_pp else "disabled"
+        print(f"\n  ✓ PROXY protocol is already {state_str} for tunnel '{name}'.\n")
+        return
+
+    # Update tunnel state
+    _state.update_tunnel(name, proxy_protocol=new_pp or "")
+    t["proxy_protocol"] = new_pp or ""
+
+    # Rewrite frpc TOML config file
+    cfg_path = Path(t.get("frp_config_path") or (_state.CONFIGS_DIR / f"{name}.toml"))
+    _toml.sync_tunnel_config_file(cfg_path, name, t, force=True)
+
+    was_running = _state.is_worker_locked(name) or t.get("status") in ("starting", "running", "reconnecting")
+    if was_running:
+        print(f"  → Reloading tunnel '{name}' to apply PROXY protocol changes...")
+        pid = int(t.get("pid", 0) or 0)
+        reloaded = False
+        if pid > 0:
+            try:
+                os.kill(pid, signal.SIGUSR1)
+                reloaded = True
+            except OSError:
+                pass
+        if not reloaded:
+            _stop_tunnel(name, t)
+            time.sleep(0.5)
+            _state.update_tunnel(name, status="starting", admin_stopped=0)
+            _spawn_worker(name)
+
+    if new_pp:
+        print(f"\n  ✓ Real client IP forwarding ({new_pp.upper()}) enabled for '{name}' [{t_type.upper()}]!")
+        print()
+        print("  ╔══════════════════════════════════════════════════════════════════╗")
+        print("  ║  ⚠  ACTION REQUIRED — Configure your server NOW                 ║")
+        print("  ╠══════════════════════════════════════════════════════════════════╣")
+        print("  ║                                                                  ║")
+        print("  ║  Without this step, players CANNOT join and all IPs will show   ║")
+        print("  ║  as your Mac's LAN IP.                                          ║")
+        print("  ║                                                                  ║")
+        if t_type == "tcp":
+            print("  ║  Minecraft Java (Paper / Purpur):                                ║")
+            print("  ║    config/paper-global.yml → proxies.proxy-protocol: true       ║")
+            print("  ║                                                                  ║")
+            print("  ║  Velocity:                                                       ║")
+            print("  ║    velocity.toml → haproxy-protocol = true                      ║")
+            print("  ║                                                                  ║")
+            print("  ║  Fabric:                                                         ║")
+            print("  ║    Install 'proxy-protocol-support' mod                         ║")
+        else:
+            print("  ║  Minecraft Bedrock (GeyserMC):                                   ║")
+            print("  ║    plugins/Geyser-Spigot/config.yml:                             ║")
+            print("  ║      bedrock:                                                    ║")
+            print("  ║        enable-proxy-protocol: true                               ║")
+        print("  ║                                                                  ║")
+        print("  ║  If players can't join after enabling, run:                     ║")
+        print(f"  ║    portx real-ip {name} off                                     ║")
+        print("  ╚══════════════════════════════════════════════════════════════════╝\n")
+    else:
+        print(f"\n  ✓ Real client IP forwarding disabled for '{name}'.")
+        print("  Players can now join normally. IPs will show as local IP.\n")
+
+

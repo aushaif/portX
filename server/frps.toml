@@ -7,7 +7,7 @@ bindPort = 7000
 vhostHTTPPort = 80
 vhostHTTPSPort = 443
 
-subDomainHost = "infinitynoob.lol"
+subDomainHost = "infinitynoob.space"
 
 auth.method = "token"
 auth.token = ""

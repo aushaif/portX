@@ -58,6 +58,7 @@ def _start_tunnel(
     subdomain: str | None = None,
     public_port: int | None = None,
     auto_start: bool = False,
+    proxy_protocol: str | None = None,   # None | 'v1' | 'v2'
 ) -> None:
     _hdr()
 
@@ -120,12 +121,14 @@ def _start_tunnel(
             local_host=local_host, local_port=local_port,
             remote_port=info["remote_port"], proxy_name=proxy_name,
             frps_host=frps_host, frps_port=frps_port,
+            proxy_protocol=proxy_protocol,
         )
     else:
         toml = _toml.generate_udp_config(
             local_host=local_host, local_port=local_port,
             remote_port=info["remote_port"], proxy_name=proxy_name,
             frps_host=frps_host, frps_port=frps_port,
+            proxy_protocol=proxy_protocol,
         )
 
     # 5. Write config to persistent file
@@ -153,6 +156,7 @@ def _start_tunnel(
         remote_port=remote_port_to_save,
         frps_host=frps_host,
         frps_port=frps_port,
+        proxy_protocol=proxy_protocol or "",
         auto_start=1,
         admin_stopped=0,
     )
@@ -164,6 +168,12 @@ def _start_tunnel(
     print(f"  Name:        {name}")
     print(f"  Local:       {display_local}")
     print(f"  Public:      {public_url}")
+    if proxy_protocol:
+        print(f"  Proxy Proto: {proxy_protocol.upper()} (Real client IP forwarding enabled)")
+        if tunnel_type == "tcp":
+            print("  Minecraft:   Set 'proxies.proxy-protocol: true' in config/paper-global.yml")
+        else:
+            print("  GeyserMC:    Set 'enable-proxy-protocol: true' under 'bedrock:' in plugins/Geyser-Spigot/config.yml")
     print()
     print("  ✓ Running in background\n")
     print("  Tip: Run 'portx watchdog install' if you haven't already,")
@@ -273,11 +283,24 @@ def main() -> None:
         epilog="""Examples:
   portx tcp 25565
   portx tcp 192.168.0.9:25565 mc-server -p 25565
+  portx tcp 192.168.0.9:25565 mc-server -p 25565 --proxy-protocol v2
   portx tcp <ip:port> <name> -p <remote port>""",
     )
     p_tcp.add_argument("local_address", help="Port or host:port")
     p_tcp.add_argument("name", nargs="?", help="Optional custom tunnel name")
     p_tcp.add_argument("-p", "--p", "--port", dest="public_port", type=int, help="Optional custom public port (1-65000, e.g., 25565)")
+    p_tcp.add_argument(
+        "--proxy-protocol", dest="proxy_protocol",
+        nargs="?", const="v2", choices=["v1", "v2"], default=None, metavar="VERSION",
+        help=(
+            "Enable PROXY protocol (v1 or v2) so the backend (e.g. Minecraft) sees the real "
+            "client IP instead of 127.0.0.1. Defaults to v2."
+        ),
+    )
+    p_tcp.add_argument(
+        "--real-ip", dest="real_ip", action="store_true",
+        help="Enable real client IP forwarding for Minecraft (alias for --proxy-protocol v2)",
+    )
 
     # --- UDP ---
     p_udp = subparsers.add_parser(
@@ -292,6 +315,18 @@ def main() -> None:
     p_udp.add_argument("local_address", help="Port or host:port")
     p_udp.add_argument("name", nargs="?", help="Optional custom tunnel name")
     p_udp.add_argument("-p", "--p", "--port", dest="public_port", type=int, help="Optional custom public port (1-65000, e.g., 19132)")
+    p_udp.add_argument(
+        "--proxy-protocol", dest="proxy_protocol",
+        nargs="?", const="v2", choices=["v1", "v2"], default=None, metavar="VERSION",
+        help=(
+            "Enable PROXY protocol (v1 or v2) so Bedrock (GeyserMC) sees the real "
+            "client IP instead of local IP. Defaults to v2."
+        ),
+    )
+    p_udp.add_argument(
+        "--real-ip", dest="real_ip", action="store_true",
+        help="Enable real client IP forwarding for Bedrock/GeyserMC (alias for --proxy-protocol v2)",
+    )
 
     # --- LIST ---
     subparsers.add_parser("list", help="List all tunnels",
@@ -360,6 +395,31 @@ def main() -> None:
 
     # --- STATUS ---
     subparsers.add_parser("status", help="Show PortX status")
+
+    # --- PROXY PROTOCOL / REAL IP ---
+    p_pp = subparsers.add_parser(
+        "proxy-protocol",
+        aliases=["real-ip", "ip-passthrough"],
+        help="Enable/disable real client IP forwarding (PROXY protocol) for Minecraft Java (TCP) and Bedrock (UDP)",
+        description=(
+            "Enable or disable PROXY protocol header injection on a TCP or UDP tunnel.\n"
+            "This allows backend servers like Minecraft Java (Paper/Purpur/Fabric/Velocity)\n"
+            "and Bedrock (GeyserMC) to receive each player's true public IP address.\n\n"
+            "Commands:\n"
+            "  portx proxy-protocol <name> on     Enable PROXY protocol v2\n"
+            "  portx proxy-protocol <name> off    Disable PROXY protocol\n"
+            "  portx proxy-protocol <name> status Check current status and config tips\n\n"
+            "IMPORTANT: You MUST also configure your server (Paper or Geyser) to parse PROXY headers.\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_pp.add_argument("name", nargs="?", help="Tunnel name (or use --all)")
+    p_pp.add_argument("--all", action="store_true", help="Apply to all TCP and UDP tunnels")
+    p_pp.add_argument(
+        "action", nargs="?", default="status",
+        choices=["on", "off", "v1", "v2", "status"],
+        help="on | off | v1 | v2 | status (default: status)",
+    )
 
     # --- WATCHDOG ---
     p_watchdog = subparsers.add_parser(
@@ -448,9 +508,29 @@ def main() -> None:
         if args.command in ("http", "https"):
             _start_tunnel("http", args.local_address, args.name, args.subdomain)
         elif args.command == "tcp":
-            _start_tunnel("tcp", args.local_address, args.name, public_port=getattr(args, "public_port", None))
+            pp = getattr(args, "proxy_protocol", None)
+            if not pp and getattr(args, "real_ip", False):
+                pp = "v2"
+            _start_tunnel(
+                "tcp", args.local_address, args.name,
+                public_port=getattr(args, "public_port", None),
+                proxy_protocol=pp,
+            )
         elif args.command == "udp":
-            _start_tunnel("udp", args.local_address, args.name, public_port=getattr(args, "public_port", None))
+            pp = getattr(args, "proxy_protocol", None)
+            if not pp and getattr(args, "real_ip", False):
+                pp = "v2"
+            _start_tunnel(
+                "udp", args.local_address, args.name,
+                public_port=getattr(args, "public_port", None),
+                proxy_protocol=pp,
+            )
+        elif args.command in ("proxy-protocol", "real-ip", "ip-passthrough"):
+            _cmds.cmd_proxy_protocol(
+                args.name,
+                getattr(args, "action", "status"),
+                apply_all=getattr(args, "all", False),
+            )
         elif args.command == "list":
             _cmds.cmd_list()
         elif args.command == "info":

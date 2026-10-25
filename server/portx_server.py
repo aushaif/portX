@@ -44,11 +44,11 @@ Usage:
 Environment variables (all optional):
   PORTX_API_HOST       Bind address          (default: 0.0.0.0)
   PORTX_API_PORT       API listen port       (default: 8765)
-  PORTX_FRPS_HOST      frps hostname         (default: server.infinitynoob.lol)
+  PORTX_FRPS_HOST      frps hostname         (default: server.infinitynoob.space)
   PORTX_FRPS_PORT      frps bind port        (default: 7000)
-  PORTX_HTTP_DOMAIN    Wildcard HTTP domain  (default: infinitynoob.lol)
-  PORTX_TCP_DOMAIN     TCP tunnel hostname   (default: server.infinitynoob.lol)
-  PORTX_UDP_DOMAIN     UDP tunnel hostname   (default: server.infinitynoob.lol)
+  PORTX_HTTP_DOMAIN    Wildcard HTTP domain  (default: infinitynoob.space)
+  PORTX_TCP_DOMAIN     TCP tunnel hostname   (default: infinitynoob.space)
+  PORTX_UDP_DOMAIN     UDP tunnel hostname   (default: infinitynoob.space)
   PORTX_TCP_PORT_MIN   TCP port pool start   (default: 30000)
   PORTX_TCP_PORT_MAX   TCP port pool end     (default: 31999)
   PORTX_UDP_PORT_MIN   UDP port pool start   (default: 32000)
@@ -113,16 +113,16 @@ API_PORT = int(os.environ.get("PORTX_API_PORT",
     str(_pcfg("server", "api_port", 8765))))
 
 FRPS_HOST = os.environ.get("PORTX_FRPS_HOST",
-    str(_pcfg("server", "frps_host", "server.infinitynoob.lol")))
+    str(_pcfg("server", "frps_host", "server.infinitynoob.space")))
 FRPS_PORT = int(os.environ.get("PORTX_FRPS_PORT",
     str(_pcfg("server", "frps_port", 7000))))
 
 HTTP_DOMAIN = os.environ.get("PORTX_HTTP_DOMAIN",
-    str(_pcfg("domains", "http", "infinitynoob.lol")))
+    str(_pcfg("domains", "http", "infinitynoob.space")))
 TCP_DOMAIN  = os.environ.get("PORTX_TCP_DOMAIN",
-    str(_pcfg("domains", "tcp", "server.infinitynoob.lol")))
+    str(_pcfg("domains", "tcp", "infinitynoob.space")))
 UDP_DOMAIN  = os.environ.get("PORTX_UDP_DOMAIN",
-    str(_pcfg("domains", "udp", "server.infinitynoob.lol")))
+    str(_pcfg("domains", "udp", "infinitynoob.space")))
 
 TCP_PORT_MIN = int(os.environ.get("PORTX_TCP_PORT_MIN",
     str(_pcfg("ports", "tcp_pool_min", 30000))))

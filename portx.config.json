@@ -10,17 +10,17 @@
     "install_script_path": "scripts/install.sh"
   },
   "server": {
-    "frps_host": "server.infinitynoob.lol",
+    "frps_host": "server.infinitynoob.space",
     "frps_port": 7000,
     "frps_udp_port": 7001,
     "api_host": "0.0.0.0",
     "api_port": 8765,
-    "api_url": "http://server.infinitynoob.lol:8765"
+    "api_url": "http://server.infinitynoob.space:8765"
   },
   "domains": {
-    "http": "infinitynoob.lol",
-    "tcp": "server.infinitynoob.lol",
-    "udp": "server.infinitynoob.lol"
+    "http": "infinitynoob.space",
+    "tcp": "infinitynoob.space",
+    "udp": "infinitynoob.space"
   },
   "ports": {
     "tcp_pool_min": 30000,

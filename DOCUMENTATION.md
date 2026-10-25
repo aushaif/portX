@@ -76,8 +76,8 @@ portx api <your-auth-token>
 │                 PortX Cloud Gateway (VPS)                  │
 │                                                            │
 │   HTTP/HTTPS: https://<subdomain>.infinitynoob.lol         │
-│   TCP:        tcp.portx.infinitynoob.lol:<port>            │
-│   UDP:        udp.portx.infinitynoob.lol:<port>            │
+│   TCP:        server.infinitynoob.lol:<port>               │
+│   UDP:        server.infinitynoob.lol:<port>               │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -128,12 +128,28 @@ Expose any TCP service (Minecraft, SSH, PostgreSQL, Redis, custom TCP sockets).
 # Expose local Minecraft Java server (assigns random public port)
 portx tcp 25565
 
-# Expose with a specific custom public port (e.g. 25565)
-portx tcp 25565 minecraft --p 25565
-# Output: tcp.portx.infinitynoob.lol:25565
+# Expose Minecraft server with specific port and Real Client IP passthrough
+portx tcp 25565 minecraft -p 25565 --real-ip
+# Output: server.infinitynoob.lol:25565
 
 # Forward local SSH server
-portx tcp 22 my-mac-ssh --p 2222
+portx tcp 22 my-mac-ssh -p 2222
+```
+
+> **Minecraft Client Real-IP Forwarding:**
+> By default, reverse proxying NATs traffic, causing Minecraft to see player IPs as `127.0.0.1`.
+> Adding `--real-ip` (or `--proxy-protocol v2`) instructs PortX to inject HAProxy PROXY protocol v2 headers with the player's true public IP.
+> **Minecraft configuration required:**
+> - **Paper / Purpur:** In `config/paper-global.yml`, set `proxies.proxy-protocol: true`
+> - **Fabric:** Install the `proxy-protocol-support` mod
+> - **Velocity:** In `velocity.toml`, set `haproxy-protocol = true`
+
+### `portx real-ip <name> [on|off|status]`
+Toggle or inspect PROXY protocol real-IP forwarding for any existing TCP tunnel:
+```bash
+portx real-ip minecraft on     # Enable real client IP forwarding
+portx real-ip minecraft off    # Disable real client IP forwarding
+portx real-ip minecraft status # Check status and setup instructions
 ```
 
 ### `portx udp`
@@ -141,8 +157,8 @@ Expose UDP-based protocols (Minecraft Bedrock, gaming servers, DNS, VoIP).
 
 ```bash
 # Expose Minecraft Bedrock on default port 19132
-portx udp 19132 bedrock --p 19132
-# Output: udp.portx.infinitynoob.lol:19132
+portx udp 19132 bedrock -p 19132
+# Output: server.infinitynoob.lol:19132
 ```
 
 ### `portx list`
@@ -159,8 +175,8 @@ PORTX TUNNELS
 NAME            TYPE   LOCAL             PUBLIC                                STATUS
 ──────────────────────────────────────────────────────────────────────────────────────────
 my-portfolio    HTTP   127.0.0.1:3000    https://preview.infinitynoob.lol      RUNNING
-minecraft       TCP    127.0.0.1:25565   tcp.portx.infinitynoob.lol:25565      RUNNING
-bedrock         UDP    127.0.0.1:19132   udp.portx.infinitynoob.lol:19132      RUNNING
+minecraft       TCP    127.0.0.1:25565   server.infinitynoob.lol:25565        RUNNING
+bedrock         UDP    127.0.0.1:19132   server.infinitynoob.lol:19132        RUNNING
 ```
 
 ### `portx info <name>`
@@ -296,7 +312,7 @@ Access your home machine or Raspberry Pi from anywhere in the world:
 ```bash
 portx tcp 22 home-pi --p 22022
 # Connect from anywhere:
-# ssh -p 22022 user@tcp.portx.infinitynoob.lol
+# ssh -p 22022 user@server.infinitynoob.lol
 ```
 
 ### 4. Database Sharing & Client Demos
@@ -310,7 +326,7 @@ portx http 8080 client-demo
 
 ## 7. Developer REST API Reference
 
-Base Endpoint: `http://portx.infinitynoob.lol:8765`  
+Base Endpoint: `http://server.infinitynoob.lol:8765`  
 Header: `Authorization: Bearer <token>`
 
 ### Endpoints Overview
@@ -342,7 +358,7 @@ Header: `Authorization: Bearer <token>`
   "subdomain": "my-preview",
   "public_url": "https://my-preview.infinitynoob.lol",
   "proxy_name": "portx-http-my-preview",
-  "frps_host": "portx.infinitynoob.lol",
+  "frps_host": "server.infinitynoob.lol",
   "frps_port": 7000
 }
 ```
