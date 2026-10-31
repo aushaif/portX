@@ -25,6 +25,10 @@ import frp_runner
 import portx_server as server
 import commands
 import portx as client
+import worker
+import supervisor
+import pwd
+import plistlib
 import io
 from contextlib import redirect_stdout
 
@@ -69,6 +73,25 @@ class CLITests(unittest.TestCase):
                      patch.object(client, '_start_tunnel') as start:
                     client.main()
                     self.assertEqual(start.call_args.kwargs['auto_start'], enabled)
+
+
+class BackgroundServiceTests(unittest.TestCase):
+    def test_backend_failure_does_not_restart_relay(self):
+        self.assertFalse(worker._is_transport_failure(
+            'connect to local service [192.168.0.8:80] error: connect: connection refused'))
+        self.assertFalse(worker._is_transport_failure(
+            'connect to local service [192.168.0.8:80] error: i/o timeout'))
+        self.assertTrue(worker._is_transport_failure('connect to server error: connection refused'))
+        self.assertTrue(worker._is_transport_failure('heartbeat timeout'))
+
+    def test_backend_unreachable_is_reported_separately(self):
+        with patch.object(worker.socket, 'create_connection', side_effect=OSError(65, 'No route to host')), \
+             patch.object(worker._state, 'update_tunnel') as update:
+            worker._check_backend_health(dict(type='http', local_host='192.168.0.8', local_port=80))
+        self.assertEqual(update.call_args.kwargs['backend_status'], 'unreachable')
+        self.assertIn('No route to host', update.call_args.kwargs['backend_error'])
+        self.assertNotIn('status', update.call_args.kwargs)
+
 
 
 class EditTests(unittest.TestCase):
@@ -178,6 +201,64 @@ class WorkerLifecycleTests(unittest.TestCase):
                 while time.monotonic() < deadline and state.is_worker_locked(name):
                     time.sleep(0.05)
             self.assertFalse(state.is_worker_locked(name))
+
+
+class SupervisorLifecycleTests(unittest.TestCase):
+    def test_shared_supervisor_survives_terminal_signals_and_restores_workers(self):
+        saved = state.load_tunnels()
+        state.save_tunnels({})
+        binary = Path(TEMP.name) / 'supervisor-frpc'
+        binary.write_text('#!' + sys.executable + "\nimport time\nprint('start proxy success', flush=True)\ntime.sleep(90)\n")
+        binary.chmod(0o700)
+        def wait_for(check, timeout=8):
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                result = check()
+                if result:
+                    return result
+                time.sleep(0.05)
+            self.fail('Supervisor condition not satisfied')
+        try:
+            for name, auto in [('supervised', 1), ('manual', 0)]:
+                state.update_tunnel(name, type='http', local_port=8080, subdomain=name,
+                                    frp_config_path=str(state.CONFIGS_DIR / (name+'.toml')),
+                                    log_path=str(state.LOGS_DIR / (name+'.log')),
+                                    status='starting', auto_start=auto, admin_stopped=0)
+            with patch.dict(os.environ, PORTX_FRP_BINARY=str(binary)):
+                supervisor.request_start('supervised')
+                supervisor.request_start('manual')
+                wait_for(lambda: all(state.load_tunnels().get(n,{}).get('status') == 'running'
+                                     for n in ('supervised', 'manual')))
+                pid = wait_for(lambda: json.loads(supervisor._RECORD.read_text())['pid']
+                               if supervisor._RECORD.exists() else False)
+                supervisor.ensure_running()
+                self.assertEqual(json.loads(supervisor._RECORD.read_text())['pid'], pid)
+                os.kill(pid, signal.SIGHUP)
+                os.kill(pid, signal.SIGTERM)
+                time.sleep(0.2)
+                self.assertTrue(supervisor.is_running())
+                old_worker = state.load_tunnels()['supervised']['pid']
+                os.kill(old_worker, signal.SIGTERM)
+                wait_for(lambda: state.load_tunnels()['supervised'].get('pid',0) not in (0,old_worker)
+                         and state.load_tunnels()['supervised']['status'] == 'running')
+                manual = state.load_tunnels()['manual']['pid']
+                os.kill(manual, signal.SIGTERM)
+                wait_for(lambda: not state.is_worker_locked('manual'))
+                state.update_tunnel('supervised', admin_stopped=1)
+                os.kill(state.load_tunnels()['supervised']['pid'], signal.SIGTERM)
+                wait_for(lambda: not state.is_worker_locked('supervised'))
+                time.sleep(2.3)
+                self.assertFalse(state.is_worker_locked('supervised'))
+                self.assertFalse(state.is_worker_locked('manual'))
+                supervisor.shutdown()
+                self.assertFalse(supervisor.is_running())
+        finally:
+            supervisor.shutdown()
+            for name, tunnel in state.load_tunnels().items():
+                pid = int(tunnel.get('pid',0))
+                if pid and state.is_worker_locked(name):
+                    os.killpg(pid,signal.SIGKILL)
+            state.save_tunnels(saved)
 
 
 class AllocatorTests(unittest.TestCase):

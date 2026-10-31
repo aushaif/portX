@@ -3,14 +3,12 @@
 from pathlib import Path
 import argparse
 import shutil
-import subprocess
 import sys
 import time
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--watchdog', action='store_true', help='Install the login/boot service')
     parser.add_argument('--api-url', help='Override the API URL after validating the server')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
@@ -42,6 +40,11 @@ def main():
     if args.api_url:
         config.set_api_url(args.api_url)
     # Apply migration before restarting the workers.
+    import supervisor
+    supervisor.retire_legacy_agent()
+    supervisor.shutdown()
+    for obsolete in ("watchdog.py", "launchd.py"):
+        (lib / obsolete).unlink(missing_ok=True)
     import commands
     commands._sync_all_existing_tunnels(restart_running=False)
     import state
@@ -50,9 +53,6 @@ def main():
             commands._stop_tunnel(name, tunnel)
             state.update_tunnel(name, admin_stopped=0, status='starting')
             commands._spawn_worker(name)
-    if args.watchdog:
-        import launchd
-        print(launchd.install())
     print(f'Installed {wrapper}. Backup: {backup}')
 
 

@@ -180,8 +180,7 @@ def _start_tunnel(
             print("  GeyserMC:    Set 'enable-proxy-protocol: true' under 'bedrock:' in plugins/Geyser-Spigot/config.yml")
     print()
     print("  ✓ Running in background\n")
-    print("  Tip: Run 'portx watchdog install' if you haven't already,")
-    print("       to enable boot-time auto-start for all tunnels.\n")
+    print("  Automatic recovery is built in. No service installation is needed.\n")
 
 
 _HELP_EPILOG = """
@@ -206,8 +205,6 @@ Examples:
   portx list                                            # View all tunnels and their status
   portx info my-app                                     # Show detailed tunnel configuration
   portx status                                          # System health and server connection
-  portx watchdog install                                # Enable boot-time auto-start background service
-  portx watchdog status                                 # Check watchdog daemon health
   portx api <token>                                     # Set or update your auth token
   portx api ls                                          # Show current API URL and token
 """
@@ -232,7 +229,6 @@ def main() -> None:
         print("    edit        Interactively edit a tunnel's configuration")
         print("    remove      Permanently delete a tunnel and release its URL/port")
         print("    status      Show PortX system status")
-        print("    watchdog    Manage the boot-time auto-start service")
         print("    api         Set auth token or show config")
         print("    config      View or change PortX settings (server, domains, API URL)")
         print("    cleanup     Clean up orphaned tunnel files")
@@ -425,26 +421,6 @@ def main() -> None:
         help="on | off | v1 | v2 | status (default: status)",
     )
 
-    # --- WATCHDOG ---
-    p_watchdog = subparsers.add_parser(
-        "watchdog",
-        help="Manage the boot-time auto-start service",
-        description=(
-            "The PortX watchdog is a background daemon that automatically starts\n"
-            "tunnels marked with --auto-start after a reboot or power failure.\n\n"
-            "Subcommands:\n"
-            "  portx watchdog install     Install and start the watchdog service\n"
-            "  portx watchdog uninstall   Remove the watchdog service\n"
-            "  portx watchdog status      Show watchdog health\n"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    p_watchdog.add_argument(
-        "subcommand",
-        choices=["install", "uninstall", "status"],
-        help="install | uninstall | status",
-    )
-
     # --- CLEANUP ---
     p_cleanup = subparsers.add_parser("cleanup", help="Clean up orphaned tunnel files")
     p_cleanup.add_argument("--force", action="store_true",
@@ -508,11 +484,16 @@ def main() -> None:
 
     for tunnel_parser in (p_http, p_https, p_tcp, p_udp):
         tunnel_parser.add_argument("--auto-start", dest="auto_start", action="store_true", default=True,
-                                   help="Recover automatically after login/boot (default)")
+                                   help="Recover automatically in the background (default)")
         tunnel_parser.add_argument("--no-auto-start", dest="auto_start", action="store_false",
-                                   help="Disable watchdog recovery for this tunnel")
+                                   help="Disable automatic recovery for this tunnel")
 
     args = parser.parse_args()
+    if args.command not in ("stop", "remove", "cleanup", "uninstall", "unistall"):
+        import supervisor
+        if any(t.get("auto_start", 1) and not t.get("admin_stopped")
+               for t in _state.load_tunnels().values()):
+            supervisor.ensure_running()
 
     try:
         if args.command in ("http", "https"):
@@ -576,14 +557,6 @@ def main() -> None:
             _cmds.cmd_reload(getattr(args, "name", None))
         elif args.command == "status":
             _cmds.cmd_status()
-        elif args.command == "watchdog":
-            sub = args.subcommand
-            if sub == "install":
-                _cmds.cmd_watchdog_install()
-            elif sub == "uninstall":
-                _cmds.cmd_watchdog_uninstall()
-            elif sub == "status":
-                _cmds.cmd_watchdog_status()
         elif args.command == "cleanup":
             _cmds.cmd_cleanup(args.force)
         elif args.command in ("uninstall", "unistall"):

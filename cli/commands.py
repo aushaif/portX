@@ -1,6 +1,6 @@
 """
 Management commands for PortX background tunnels.
-Implements list, info, stop, remove, restart, reload, status, watchdog,
+Implements list, info, stop, remove, restart, reload, status, supervisor,
 config, cleanup, and uninstall.
 """
 
@@ -20,6 +20,7 @@ import api_client as _api
 import config as _cfg
 import frp_config as _toml
 import state as _state
+import supervisor as _supervisor
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +58,7 @@ def _stop_tunnel(name: str, tunnel: dict) -> None:
     so the same URL/subdomain/port is preserved.  The tunnel can be restarted
     later with 'portx restart' without changing its public address.
 
-    Sets admin_stopped=1 to tell the watchdog not to auto-restart this tunnel.
+    Sets admin_stopped=1 to tell the supervisor not to auto-restart this tunnel.
     """
     _state.update_tunnel(name, admin_stopped=1)
     _kill_worker(name, tunnel)
@@ -72,18 +73,7 @@ def _spawn_worker(name: str) -> None:
         cfg_path = Path(t.get("frp_config_path") or (_state.CONFIGS_DIR / f"{name}.toml"))
         _toml.sync_tunnel_config_file(cfg_path, name, t)
 
-    worker_script = Path(__file__).resolve().parent / "worker.py"
-
-    proc = subprocess.Popen(
-        [sys.executable, str(worker_script), name],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,  # Detach from terminal (calls setsid internally)
-        close_fds=True,          # Don't inherit open file descriptors from CLI
-    )
-
-    # The worker publishes its PID only after taking its exclusive lock.
+    _supervisor.request_start(name)
 
     # Wait briefly for worker to either fail or succeed
     deadline = time.monotonic() + _cfg.FRPC_CONNECT_TIMEOUT + 3
@@ -91,7 +81,7 @@ def _spawn_worker(name: str) -> None:
         t = _state.get_tunnel(name)
         if t and t.get("status") in ("running", "failed", "reconnecting"):
             break
-        if proc.poll() is not None:
+        if not _supervisor.is_running():
             break
         time.sleep(0.1)
 
@@ -124,6 +114,8 @@ def cmd_list() -> None:
         local  = f"{t.get('local_host', '')}:{t.get('local_port', '')}"
         public = t.get("public_url", "")
         status = t.get("status", "unknown").upper()
+        if status == "RUNNING" and t.get("backend_status") == "unreachable":
+            status = "BACKEND DOWN"
         auto   = " ★" if t.get("auto_start") else ""
         print(
             f"  {name[:14]:<15} {t_type[:5]:<6} {local[:19]:<20} "
@@ -131,7 +123,7 @@ def cmd_list() -> None:
         )
 
     print()
-    print("  ★ = auto-start enabled (survives reboot)")
+    print("  ★ = automatic recovery enabled")
     print()
 
 
@@ -155,6 +147,9 @@ def cmd_info(name: str) -> None:
     if reconnecting:
         print(f"  Last error:  {t.get('error', 'none')}")
     print(f"  Auto-start:  {auto_start}")
+    print(f"  Backend:     {t.get('backend_status', 'not checked')}")
+    if t.get("backend_error"):
+        print(f"  Backend err: {t['backend_error']}")
     if t.get("type") in ("tcp", "udp"):
         pp = t.get("proxy_protocol")
         pp_display = f"{pp.upper()} (Real client IP forwarding)" if pp else "Disabled"
@@ -286,7 +281,7 @@ def cmd_restart(name: str) -> None:
 
     print(f"\n  → Restarting tunnel '{name}'...")
 
-    # Clear admin_stopped so watchdog can manage it again
+    # Clear admin_stopped so supervisor can manage it again
     _state.update_tunnel(name, status="starting", admin_stopped=0)
     _spawn_worker(name)
 
@@ -648,7 +643,8 @@ def cmd_reload(name: str | None = None) -> None:
 def cmd_status() -> None:
     tunnels = _state.list_tunnels()
 
-    running      = sum(1 for t in tunnels.values() if t.get("status") == "running")
+    running      = sum(1 for t in tunnels.values() if t.get("status") == "running" and t.get("backend_status") != "unreachable")
+    backend_down = sum(1 for t in tunnels.values() if t.get("status") == "running" and t.get("backend_status") == "unreachable")
     reconnecting = sum(1 for t in tunnels.values() if t.get("status") == "reconnecting")
     stopped      = sum(1 for t in tunnels.values() if t.get("status") in ("stopped", "failed"))
     auto_start   = sum(1 for t in tunnels.values() if t.get("auto_start"))
@@ -667,77 +663,19 @@ def cmd_status() -> None:
     except Exception:
         server_status = "Unreachable"
 
-    # Check watchdog
-    try:
-        import launchd as _launchd
-        watchdog_installed = _launchd.is_installed()
-        watchdog_running   = _launchd.is_running() if watchdog_installed else False
-        watchdog_status    = "Running" if watchdog_running else ("Installed, not running" if watchdog_installed else "Not installed")
-    except Exception:
-        watchdog_status = "Unknown"
+    supervisor_status = "Running" if _supervisor.is_running() else "Stopped"
 
     print(f"  Server:    {server_status}")
     print(f"  API URL:   {api_url}")
-    print(f"  Tunnels:   {running} running, {reconnecting} reconnecting, {stopped} stopped")
+    print(f"  Tunnels:   {running} running, {backend_down} backend down, {reconnecting} reconnecting, {stopped} stopped")
     print(f"  Auto-start:{auto_start} tunnel(s) marked for auto-start")
-    print(f"  Watchdog:  {watchdog_status}")
-    print()
-
-
-def cmd_watchdog_install() -> None:
-    """Install the watchdog as a boot service (macOS LaunchAgent or Linux systemd)."""
-    import launchd as _launchd
-    print("\n  → Installing PortX watchdog service...")
-    try:
-        msg = _launchd.install()
-        print(f"\n  ✓ {msg}")
-        print()
-        print("  The watchdog will now automatically restart your auto-start tunnels")
-        print("  after login, reboot, or power failure.")
-        print()
-        print("  Mark a tunnel for auto-start with:")
-        print("    portx http 8080 --auto-start")
-        print()
-    except RuntimeError as exc:
-        print(f"\n  ✗ Installation failed: {exc}\n", file=sys.stderr)
-        sys.exit(1)
-
-
-def cmd_watchdog_uninstall() -> None:
-    """Remove the watchdog boot service."""
-    import launchd as _launchd
-    print("\n  → Removing PortX watchdog service...")
-    try:
-        msg = _launchd.uninstall()
-        print(f"\n  ✓ {msg}\n")
-    except RuntimeError as exc:
-        print(f"\n  ✗ Removal failed: {exc}\n", file=sys.stderr)
-        sys.exit(1)
-
-
-def cmd_watchdog_status() -> None:
-    """Show the watchdog installation and running status."""
-    import launchd as _launchd
-    installed = _launchd.is_installed()
-    running   = _launchd.is_running() if installed else False
-
-    # Count auto-start tunnels
-    tunnels   = _state.list_tunnels()
-    auto_count = sum(1 for t in tunnels.values() if t.get("auto_start"))
-
-    print()
-    print(f"  Watchdog installed: {'Yes' if installed else 'No'}")
-    print(f"  Watchdog running:   {'Yes' if running else 'No'}")
-    print(f"  Auto-start tunnels: {auto_count}")
-    if not installed:
-        print()
-        print("  Install with: portx watchdog install")
+    print(f"  Supervisor: {supervisor_status} (built in)")
     print()
 
 
 def _kill_all_portx_processes() -> None:
     """Kill every frpc and portx worker process on the system, regardless of state."""
-    targets = ["worker.py", str(Path.home() / ".portx" / "bin" / "frpc"), "frpc", "watchdog.py"]
+    targets = ["worker.py", str(Path.home() / ".portx" / "bin" / "frpc"), "frpc", "supervisor.py"]
     pids_to_kill: set[int] = set()
     my_pid = os.getpid()
 
@@ -802,17 +740,10 @@ def cmd_uninstall() -> None:
         print("    To remove runtime data:  rm -rf ~/.portx\n")
         sys.exit(1)
 
-    # 2. Remove watchdog boot service first
-    try:
-        import launchd as _launchd
-        if _launchd.is_installed():
-            print("  → Removing watchdog boot service...")
-            _launchd.uninstall()
-            print("  ✓ Watchdog service removed.")
-    except Exception:
-        pass
+    _supervisor.retire_legacy_agent()
+    _supervisor.shutdown()
 
-    # 3. Kill ALL lingering frpc / worker / watchdog processes
+    # 3. Kill ALL lingering frpc / worker / supervisor processes
     print("  → Killing all PortX background processes...")
     _kill_all_portx_processes()
 

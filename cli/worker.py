@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import os
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -153,6 +154,29 @@ _LIVE_FAILURE_MARKERS = (
 )
 
 
+def _is_transport_failure(line: str) -> bool:
+    # Local target errors do not mean the relay connection is broken. Restarting
+    # frpc on every failed backend request creates needless reconnect storms.
+    lower = line.lower()
+    return "connect to local service" not in lower and any(
+        marker in lower for marker in _LIVE_FAILURE_MARKERS)
+
+
+def _check_backend_health(tunnel: dict) -> None:
+    if tunnel.get("type", "http") not in ("http", "tcp"):
+        return
+    try:
+        with socket.create_connection((tunnel.get("local_host", "127.0.0.1"),
+                                       int(tunnel["local_port"])), timeout=2):
+            pass
+        status, error = "reachable", ""
+    except OSError as exc:
+        status, error = "unreachable", str(exc)
+    if tunnel.get("backend_status") != status or tunnel.get("backend_error", "") != error:
+        _state.update_tunnel(_tunnel_name, backend_status=status, backend_error=error)
+        _log(f"Local backend {status}: {error}" if error else "Local backend reachable")
+
+
 def _start_stdout_drainer(
     proc: "subprocess.Popen",
     conn_lost_event: threading.Event,
@@ -168,8 +192,7 @@ def _start_stdout_drainer(
                 line = raw.rstrip()
                 if line:
                     _log(f"[frpc] {line}")
-                lower = line.lower()
-                if any(m in lower for m in _LIVE_FAILURE_MARKERS):
+                if _is_transport_failure(line):
                     _log(f"Live failure marker detected in frpc output: {line}")
                     conn_lost_event.set()
         except Exception:
@@ -451,6 +474,9 @@ def main() -> None:
         _state.update_tunnel(_tunnel_name, status="running", pid=os.getpid(), error="")
         backoff = _INITIAL_BACKOFF  # successful connection → reset backoff
 
+        _check_backend_health(_state.get_tunnel(_tunnel_name) or tunnel)
+        next_backend_check = time.monotonic() + 30
+
         # Start heartbeat thread
         hb_stop = threading.Event()
         hb_thread: threading.Thread | None = None
@@ -468,6 +494,9 @@ def main() -> None:
         drain_thread = _start_stdout_drainer(_proc, conn_lost_event)
 
         while not _shutdown_flag:
+            if time.monotonic() >= next_backend_check:
+                _check_backend_health(_state.get_tunnel(_tunnel_name) or tunnel)
+                next_backend_check = time.monotonic() + 30
             ret = _proc.poll()
             if ret is not None:
                 _log(f"frpc exited (code {ret})")

@@ -1,75 +1,82 @@
-# PortX repair and verification — 31 October 2026
+# PortX repairs and current verification
 
-The Desktop checkout, installed macOS CLI, and live Ubuntu deployment at
-`ubuntu@140.245.224.53:/opt/frp` were inspected and updated.
+The Desktop checkout, installed macOS CLI, and Ubuntu relay at
+`ubuntu@140.245.224.53:/opt/frp` were inspected.
 
-## Root causes and repairs
+## Built-in recovery
 
-- The live API loaded old `.lol` defaults, while local tunnel records already
-  showed `.space`. Updated the deployed central config and migration of legacy
-  client defaults/overrides. The API now advertises `server.infinitynoob.space`.
-- FRP's HTTPS listener performs passthrough, not TLS termination. HTTP proxies
-  therefore could not answer Cloudflare's origin TLS handshake. Caddy now owns
-  ports 80/443, obtains and renews public certificates, and forwards to FRP HTTP
-  on 8080. Its certificate authorization endpoint allows allocated HTTP names
-  only. HTTP-01 challenges work through the existing Cloudflare proxy.
-- A standalone API process held port 8765 while the systemd API service repeatedly
-  crashed trying to bind it. Removed that conflicting process and restored the
-  systemd service. The separate FRP instance serving other ports was preserved.
-- Startup treated an alive frpc process as success, even without a functioning
-  proxy; two competing stdout readers could also lose errors. Startup now waits
-  for explicit proxy confirmation using a single reader, and reports failures.
-- Missing server allocations produced endless 404 heartbeats without repair.
-  Workers reclaim metadata at startup and after a 404, preserving the allocation
-  where possible. Network errors no longer trigger replacement allocations.
-- Added a macOS user LaunchAgent and installed it for the existing user. It runs
-  independently of Terminal and restarts dead auto-start workers. Explicit stops
-  disable recovery. New tunnels retain auto-start by default; opt out with
-  `--no-auto-start`.
-- Fixed stop/restart races with the watchdog, PID publication before worker lock
-  acquisition, and stale PID status updates overwriting newer workers.
-- Config sync now compares the complete generated configuration, including local
-  target and subdomain. Uses unique atomic replacement files, owner-only secret
-  file permissions, and properly escaped FRP string values.
-- Backend edits retain existing allocations; renames cannot overwrite another
-  tunnel. Reject unsafe tunnel names, malformed API bodies, invalid DNS labels,
-  and reserved reclaim ports. API mutations require the configured relay token.
-- TCP/UDP default to the DNS-only `server.infinitynoob.space` record rather than
-  a Cloudflare-proxied hostname. API traffic now uses HTTPS.
-- Added a local-checkout installer with backups, updated deployment scripts and
-  documentation, and added regression tests.
+A follow-up exposed a gap in the original hangup test: worker process survival
+alone did not prove LAN connectivity after recovery. The old user LaunchAgent
+restored Zima/Nextcloud workers, but those workers reported “no route to host”
+for `192.168.0.8`. Interactive access to the same backend worked. Apple's Local
+Network Privacy documentation explains the execution-context distinction.
+
+At the user's request, the OS watchdog system has been removed entirely:
+
+- `cli/supervisor.py` ships inside PortX and starts automatically with the CLI.
+- One supervisor per user manages all tunnels; file locks prevent duplicates.
+- The process double-forks into a detached session, closes terminal streams,
+  and ignores terminal hangup, interrupt and termination signals.
+- Recovery preserves URLs/allocations and respects explicit stops and recovery
+  opt-out. Shutdown for upgrades/uninstall uses an explicit control file.
+- No LaunchAgent, LaunchDaemon, separate download, sudo, or service installation
+  is required. The obsolete watchdog commands/modules are removed.
+- After an actual reboot, a normal PortX command resumes eligible saved tunnels.
+  Nothing can run across a reboot without some startup mechanism.
+- Backend health is reported separately from relay connectivity. Local service
+  failures no longer cause unnecessary FRP reconnections.
+
+## Other repairs retained
+
+- Updated the deployed API's stale `.lol` defaults and client domain migration.
+- Added Caddy TLS termination and certificate renewal in front of FRP's HTTP
+  listener. Certificate authorization is restricted to allocated HTTP names.
+- Removed the standalone API process conflicting with systemd on port 8765.
+- Require explicit FRP proxy startup confirmation and use a single startup reader.
+- Reclaim missing server allocations on startup and after 404 heartbeats.
+- Synchronize complete tunnel configs with atomic writes and escaped secrets.
+- Preserve allocations during backend edits and prevent rename collisions.
+- Validate names, API bodies, subdomains, and reserved ports; authenticate API
+  mutations. TCP/UDP use the DNS-only server hostname; API traffic uses HTTPS.
 
 ## Verification
 
-- 15 regression tests passed: API auth/validation, certificate authorization,
-  restart grace period, stale reaping, config sync/escaping, name safety, backend
-  edits/rename collisions, auto-start flags, startup failures, stdout handoff,
-  and a real detached worker surviving process-group and direct SIGHUP.
-- Live public `https://n8n.infinitynoob.space`: HTTP 200.
-- Direct origin request with SNI and certificate verification: HTTP 200.
-- Local n8n backend at `192.168.0.8:5678`: HTTP 200.
-- Live TCP and UDP echo round trips through the VPS passed; temporary allocations
-  were released. Final API health showed only the original n8n allocation.
-- Deliberately terminated the n8n worker; launchd watchdog restored it with a new
-  PID automatically. Watchdog and n8n were running after verification.
-- Python compilation, shell syntax validation, FRP/Caddy config validation, and
-  `git diff --check` passed.
+- 18 regression tests passed, including shared supervisor singleton behavior,
+  signal survival, automatic recovery, explicit stop and opt-out behavior,
+  backend health, API/config/allocation checks, and edit safety.
+- Live supervisor received SIGHUP and SIGTERM and retained the same PID.
+- Terminated n8n, Zima and Nextcloud workers together. The supervisor restored
+  all three with new PIDs and working LAN access.
+- Public requests after that recovery returned HTTP 200 for n8n, Zima, and the
+  Nextcloud login page (following its HTTPS redirect).
+- Downtify's backend refuses connections; the user confirmed it is deliberately
+  offline. Its configuration remains intact and it is shown as BACKEND DOWN.
+- The old user-agent job/plist and installed watchdog modules are absent. No
+  system PortX LaunchDaemon was installed.
+- Python compilation, shell syntax checks, and `git diff --check` passed.
+- Original server repair also passed live TCP/UDP echo and direct origin TLS
+  certificate validation. This follow-up did not change the server configuration.
 
-## Backups and operation
+An ordinary Python HTTP probe received 403 during the live check; curl requests
+consistently returned 200 for all three sites. That probe was not counted as a
+successful browser/HTTP check.
 
-- Original server files/state: `/opt/frp/backups/20261031T113912Z`.
-- Original installed client/settings: `~/.portx/backups/20261031-171053`.
-- macOS service: `~/Library/LaunchAgents/space.infinitynoob.portx.watchdog.plist`.
-- Install this checkout again with `python3 scripts/install-local.py`.
-- Run regression tests with `python3 -m unittest discover -s tests -v`.
-- Tunnels require the client machine and backend to remain awake and reachable.
-  User LaunchAgents start after login; recovery across an actual OS reboot was
-  not exercised. Linux client service installation was not exercised.
-- Port 80 and `/.well-known/acme-challenge/` must remain reachable for certificate
-  renewal. New names can take several seconds to obtain their first certificate.
-- Changes are local and deployed to this VPS, not published to GitHub. The remote
-  GitHub installer will not contain them until the repository is updated.
+## Operation and backups
 
-References: [FRP HTTPS passthrough](https://gofrp.org/en/docs/examples/vhost-http/),
-[Cloudflare 525](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-525/),
-[Caddy on-demand TLS](https://caddyserver.com/docs/automatic-https#on-demand-tls).
+- `portx status`: built-in supervisor and tunnel health.
+- `portx stop <name>`: stop and suppress recovery until explicitly started again.
+- `python3 scripts/install-local.py`: install this checkout without downloading
+  the GitHub version. It preserves backups under `~/.portx/backups/`.
+- Original VPS backup: `/opt/frp/backups/20261031T113912Z`.
+- Follow-up client backup: `~/.portx/backups/20261101-000619`.
+- Disabled old agent is retained only as a backup under
+  `~/.portx/backups/legacy-watchdog.plist.disabled`.
+- Regression command: `python3 -m unittest discover -s tests -v`.
+- Client/backend must remain awake and connected. Actual OS reboot and Terminal
+  GUI quit were not exercised; signal handling and live post-recovery LAN/HTTPS
+  behavior were exercised. Linux client runtime was not exercised.
+- Changes are installed locally; this follow-up has not been pushed to GitHub.
+
+References: [Apple Local Network Privacy](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy),
+[FRP HTTPS passthrough](https://gofrp.org/en/docs/examples/vhost-http/),
+[Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https).

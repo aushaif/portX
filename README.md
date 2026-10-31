@@ -39,16 +39,20 @@ brew install aushaif/portx/portx
 To install local fixes without downloading the older GitHub copy:
 
 ```bash
-python3 scripts/install-local.py --watchdog --api-url https://server.infinitynoob.space
+python3 scripts/install-local.py --api-url https://server.infinitynoob.space
 ```
 
 This backs up the installed CLI and settings in `~/.portx/backups/`, updates the
-CLI and central defaults, and restarts active workers. On macOS, the watchdog
-runs as a user LaunchAgent, independently of Terminal, and starts at login.
-New tunnels enable watchdog recovery by default; `--auto-start` is explicit,
-and `--no-auto-start` opts out. `portx stop` prevents
-watchdog recovery until you explicitly start the tunnel again. The local
-machine and the service being exposed must remain awake and reachable.
+CLI and central defaults, and restarts active workers. One built-in supervisor
+starts automatically and manages all of your tunnels. No service installation,
+extra download, or administrator access is required. It remains detached from
+Terminal and restores workers after they exit.
+
+New tunnels enable automatic recovery by default; `--auto-start` is explicit,
+and `--no-auto-start` opts out. `portx stop` prevents recovery until you start
+that tunnel again. `portx status` reports the built-in supervisor's health.
+After a reboot, run `portx list` or another normal PortX command to resume saved
+tunnels. The client machine and backend must remain awake and reachable.
 
 HTTP and HTTPS commands both expose a local **HTTP** service through public
 HTTPS. Caddy terminates TLS on the VPS and forwards HTTP to frps on port 8080.
@@ -172,7 +176,7 @@ PortX is designed to keep tunnels alive indefinitely without manual intervention
 | **Heartbeat Probes** | `heartbeatInterval = 30s`, `heartbeatTimeout = 90s` | frpc actively pings frps every 30 s. If no reply in 90 s, frpc self-terminates and the worker reconnects |
 | **Live Log Monitoring** | `worker.py` scans frpc output continuously | Detects failure markers (`heartbeat timeout`, `connection is closed`, `i/o timeout`, etc.) and triggers an immediate reconnect |
 | **Auto-Reconnect** | Exponential backoff: 2 s → 120 s max | Reconnects automatically after any dropout — no manual `portx reload` needed |
-| **Boot Recovery** | System watchdog daemon | Automatically restores all tunnels after machine reboot or power failure |
+| **Shared Recovery** | Built-in background supervisor | Restores workers without Terminal; resumes saved tunnels on the next PortX use after reboot |
 | **Server Stale Cleanup** | Reaper runs every 5 min on VPS | Releases allocations from tunnels silent for 10+ min, preventing port conflicts on reconnect |
 
 Tunnels **only restart when a real failure is detected** — there are no arbitrary periodic refreshes that would interrupt connections.

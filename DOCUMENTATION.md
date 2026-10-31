@@ -21,7 +21,7 @@
 3. **Multi-Protocol Support (HTTP, TCP, UDP):**
    Expose anything: web applications (HTTP/HTTPS with automatic SSL), game servers like Minecraft Java/Bedrock (TCP/UDP), SSH servers, databases (Postgres/MySQL), and VoIP.
 4. **Boot-Time Auto-Recovery:**
-   Enable the native system watchdog (`portx watchdog install`) to automatically restore all your active tunnels upon system boot or power failure — before user login.
+   A shared supervisor is built into PortX and starts automatically. It restores workers independently of Terminal. After a reboot, the next normal PortX command resumes saved tunnels.
 5. **Zero-Downtime Hot Reloads:**
    Update tunnel parameters or switch ports interactively (`portx edit` and `portx reload`) without losing your reserved public URL or dropping healthy connections.
 6. **Zero External Python Dependencies:**
@@ -232,19 +232,20 @@ portx remove --all
 ```
 
 ### `portx status`
-Overall system health check showing API connectivity, active tunnel counts, and watchdog daemon status.
+Overall system health check showing API connectivity, active tunnel counts, and built-in supervisor status.
 
 ```bash
 portx status
 ```
 
-### `portx watchdog install | uninstall | status`
-Set up a macOS user LaunchAgent at login with `portx watchdog install`, or a system boot service with `sudo portx watchdog install`. New tunnels enable auto-start by default; `--no-auto-start` opts out. The watchdog respects explicit stops.
+### Built-in automatic recovery
 
-```bash
-sudo portx watchdog install
-portx watchdog status
-```
+One shared background supervisor starts automatically with PortX. There is no
+separate watchdog package, installation command, LaunchAgent, or system service.
+New tunnels recover automatically unless created with `--no-auto-start`.
+Explicit `portx stop` commands remain stopped until you start them again.
+Use `portx status` to inspect the supervisor. After rebooting, run `portx list`
+to resume saved tunnels. The client and backend must stay awake and connected.
 
 ### `portx api <token>` / `portx api ls`
 Configure or inspect your API authentication credentials.
@@ -390,7 +391,7 @@ sudo env PORTX_AUTH_TOKEN="<your-relay-token>" bash /opt/portx-src/server/setup.
 Traditional tools rely on idle TCP connections. When no traffic flows, domestic routers drop the connection from their NAT translation tables, causing silent connection failure. PortX sends bidirectional TCP-level keepalives every 30 seconds and probes application heartbeats. If a packet is lost, it detects failure within 90 seconds and automatically reconnects with zero manual intervention.
 
 #### Q: Does my computer need to stay on?
-Yes. The service you are exposing runs locally on your machine. If your machine sleeps or shuts down, the tunnel pauses. However, with `sudo portx watchdog install`, PortX restores auto-start tunnels after login/boot and reconnects after waking.
+Yes. The service you are exposing runs locally on your machine. If your machine sleeps or shuts down, the tunnel pauses. PortX reconnects after waking. After a reboot, run a normal PortX command to resume saved tunnels.
 
 #### Q: Can I run multiple tunnels simultaneously?
 Yes. You can run dozens of HTTP, TCP, and UDP tunnels concurrently. Each tunnel runs in its own isolated process with dedicated kernel-level file locks.
@@ -419,7 +420,7 @@ When generating the PortX website, use this architectural layout:
 4. **Reliability Comparison Table:**
    - Compare PortX vs. traditional alternatives (Keepalives, Background daemon, Boot auto-recovery, UDP support, Hot reload).
 5. **Interactive Command Playground:**
-   - Interactive list of CLI commands (`http`, `tcp`, `udp`, `list`, `edit`, `reload`, `watchdog`).
+   - Interactive list of CLI commands (`http`, `tcp`, `udp`, `list`, `edit`, `reload`, `status`).
 6. **Use Cases Grid:**
    - 4-card grid (Webhooks, Gaming / Minecraft, SSH, Databases).
 7. **Developer Docs & API Section:**
