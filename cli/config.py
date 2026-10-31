@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -127,7 +128,21 @@ def _load_config() -> dict[str, dict]:
 def _save_config(data: dict[str, dict]) -> None:
     """Write data back to ~/.portx/config.toml."""
     PORTX_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_TOML.write_text(_toml_dumps(data), "utf-8")
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=PORTX_DIR,
+                                     prefix="config.", delete=False) as fd:
+        tmp = Path(fd.name)
+        fd.write(_toml_dumps(data))
+    try:
+        tmp.replace(CONFIG_TOML)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _migrate_legacy_value(value: str) -> str:
+    """Migrate only PortX's retired domain, preserving unrelated overrides."""
+    import re
+    return re.sub(r"(?<![a-zA-Z0-9-])infinitynoob\.lol(?=[:/]|$)",
+                  "infinitynoob.space", value)
 
 
 def _get(section: str, key: str, env_var: str | None, proj_section: str, proj_key: str, default: str) -> str:
@@ -139,14 +154,14 @@ def _get(section: str, key: str, env_var: str | None, proj_section: str, proj_ke
     cfg = _load_config()
     val = cfg.get(section, {}).get(key, "").strip()
     if val:
-        return val
+        return _migrate_legacy_value(val)
     # 2. Environment variable
     if env_var:
         val = os.environ.get(env_var, "").strip()
         if val:
             return val
     # 3. portx.config.json
-    val = str(_proj(proj_section, proj_key, "")).strip()
+    val = _migrate_legacy_value(str(_proj(proj_section, proj_key, "")).strip())
     if val:
         return val
     # 4. Built-in default
@@ -183,7 +198,7 @@ def get_frps_port() -> int:
 
 def get_api_url() -> str:
     return _get("portx", "api_url", "PORTX_API_URL",
-                "server", "api_url", "http://server.infinitynoob.space:8765")
+                "server", "api_url", "https://server.infinitynoob.space")
 
 def get_http_domain() -> str:
     return _get("portx", "http_domain", "PORTX_HTTP_DOMAIN",
@@ -191,11 +206,11 @@ def get_http_domain() -> str:
 
 def get_tcp_domain() -> str:
     return _get("portx", "tcp_domain", "PORTX_TCP_DOMAIN",
-                "domains", "tcp", "infinitynoob.space")
+                "domains", "tcp", "server.infinitynoob.space")
 
 def get_udp_domain() -> str:
     return _get("portx", "udp_domain", "PORTX_UDP_DOMAIN",
-                "domains", "udp", "infinitynoob.space")
+                "domains", "udp", "server.infinitynoob.space")
 
 def get_auth_token() -> str:
     """
@@ -206,6 +221,12 @@ def get_auth_token() -> str:
     token = cfg.get("portx", {}).get("auth_token", "").strip()
     if token:
         return token
+
+    token = os.environ.get("PORTX_AUTH_TOKEN", "").strip()
+    if token:
+        return token
+    if not sys.stdin.isatty():
+        raise RuntimeError("No auth token configured. Run: portx api <token>")
 
     # First use — prompt the user
     print()

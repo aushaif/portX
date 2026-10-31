@@ -1,6 +1,6 @@
 # PortX — Official Product & Technical Documentation
 
-> **Website Content & AI Generation Reference**  
+> **Website Content & AI Generation Reference**
 > Everything required to generate the public website, documentation portal, landing page copy, interactive CLI demos, and API reference for PortX.
 
 ---
@@ -75,9 +75,9 @@ portx api <your-auth-token>
 ┌────────────────────────────────────────────────────────────┐
 │                 PortX Cloud Gateway (VPS)                  │
 │                                                            │
-│   HTTP/HTTPS: https://<subdomain>.infinitynoob.lol         │
-│   TCP:        server.infinitynoob.lol:<port>               │
-│   UDP:        server.infinitynoob.lol:<port>               │
+│   HTTP/HTTPS: https://<subdomain>.infinitynoob.space         │
+│   TCP:        server.infinitynoob.space:<port>               │
+│   UDP:        server.infinitynoob.space:<port>               │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -118,7 +118,7 @@ portx http 127.0.0.1:3000 my-portfolio
 
 # Request a custom subdomain
 portx http 8080 --s preview
-# Output: https://preview.infinitynoob.lol
+# Output: https://preview.infinitynoob.space
 ```
 
 ### `portx tcp`
@@ -130,7 +130,7 @@ portx tcp 25565
 
 # Expose Minecraft server with specific port and Real Client IP passthrough
 portx tcp 25565 minecraft -p 25565 --real-ip
-# Output: server.infinitynoob.lol:25565
+# Output: server.infinitynoob.space:25565
 
 # Forward local SSH server
 portx tcp 22 my-mac-ssh -p 2222
@@ -158,7 +158,7 @@ Expose UDP-based protocols (Minecraft Bedrock, gaming servers, DNS, VoIP).
 ```bash
 # Expose Minecraft Bedrock on default port 19132
 portx udp 19132 bedrock -p 19132
-# Output: server.infinitynoob.lol:19132
+# Output: server.infinitynoob.space:19132
 ```
 
 ### `portx list`
@@ -174,9 +174,9 @@ PORTX TUNNELS
 
 NAME            TYPE   LOCAL             PUBLIC                                STATUS
 ──────────────────────────────────────────────────────────────────────────────────────────
-my-portfolio    HTTP   127.0.0.1:3000    https://preview.infinitynoob.lol      RUNNING
-minecraft       TCP    127.0.0.1:25565   server.infinitynoob.lol:25565        RUNNING
-bedrock         UDP    127.0.0.1:19132   server.infinitynoob.lol:19132        RUNNING
+my-portfolio    HTTP   127.0.0.1:3000    https://preview.infinitynoob.space      RUNNING
+minecraft       TCP    127.0.0.1:25565   server.infinitynoob.space:25565        RUNNING
+bedrock         UDP    127.0.0.1:19132   server.infinitynoob.space:19132        RUNNING
 ```
 
 ### `portx info <name>`
@@ -239,11 +239,11 @@ portx status
 ```
 
 ### `portx watchdog install | uninstall | status`
-Set up the operating system service (`LaunchDaemon` on macOS, `systemd` on Linux) to restore all active tunnels when your computer reboots.
+Set up a macOS user LaunchAgent at login with `portx watchdog install`, or a system boot service with `sudo portx watchdog install`. New tunnels enable auto-start by default; `--no-auto-start` opts out. The watchdog respects explicit stops.
 
 ```bash
 sudo portx watchdog install
-sudo portx watchdog status
+portx watchdog status
 ```
 
 ### `portx api <token>` / `portx api ls`
@@ -295,7 +295,7 @@ Expose your local development server to test third-party webhooks without deploy
 ```bash
 portx http 3000 --s stripe-hooks
 ```
-Configure `https://stripe-hooks.infinitynoob.lol/api/webhooks` in your provider's dashboard.
+Configure `https://stripe-hooks.infinitynoob.space/api/webhooks` in your provider's dashboard.
 
 ### 2. Minecraft Java & Bedrock Dedicated Servers
 Host multiplayer servers for your friends directly from your computer with static ports:
@@ -312,7 +312,7 @@ Access your home machine or Raspberry Pi from anywhere in the world:
 ```bash
 portx tcp 22 home-pi --p 22022
 # Connect from anywhere:
-# ssh -p 22022 user@server.infinitynoob.lol
+# ssh -p 22022 user@server.infinitynoob.space
 ```
 
 ### 4. Database Sharing & Client Demos
@@ -326,7 +326,7 @@ portx http 8080 client-demo
 
 ## 7. Developer REST API Reference
 
-Base Endpoint: `http://server.infinitynoob.lol:8765`  
+Base Endpoint: `https://server.infinitynoob.space`
 Header: `Authorization: Bearer <token>`
 
 ### Endpoints Overview
@@ -356,9 +356,9 @@ Header: `Authorization: Bearer <token>`
   "tunnel_id": "9a7b1c3d-11e2-4b5a-90ef-8f12345678ab",
   "type": "http",
   "subdomain": "my-preview",
-  "public_url": "https://my-preview.infinitynoob.lol",
+  "public_url": "https://my-preview.infinitynoob.space",
   "proxy_name": "portx-http-my-preview",
-  "frps_host": "server.infinitynoob.lol",
+  "frps_host": "server.infinitynoob.space",
   "frps_port": 7000
 }
 ```
@@ -367,17 +367,19 @@ Header: `Authorization: Bearer <token>`
 
 ## 8. Self-Hosting & VPS Deployment
 
-Developers who prefer running their own private tunneling relay can deploy the PortX server stack on Ubuntu or Debian in under 2 minutes:
+Developers who prefer running their own private tunneling relay can deploy the PortX server stack on Ubuntu or Debian with the setup script:
 
 ```bash
 git clone https://github.com/aushaif/portX /opt/portx-src
-sudo bash /opt/portx-src/server/setup.sh
+sudo env PORTX_AUTH_TOKEN="<your-relay-token>" bash /opt/portx-src/server/setup.sh
 ```
 
 **What the setup script provisions:**
 - Installs Python 3, `ufw` firewall rules, and dependencies.
 - Downloads and provisions the matching `frps` binary.
-- Configures systemd units for `frps.service` and `portx-api.service`.
+- Configures systemd units for `frps.service`, `portx-api.service`, and Caddy.
+- Terminates HTTPS in Caddy and obtains/renews certificates for allocated HTTP names.
+- Uses a DNS-only server hostname for raw TCP/UDP connections.
 - Enables persistent state tracking in `/opt/portx/state.json` with atomic backup guards.
 
 ---
@@ -388,7 +390,7 @@ sudo bash /opt/portx-src/server/setup.sh
 Traditional tools rely on idle TCP connections. When no traffic flows, domestic routers drop the connection from their NAT translation tables, causing silent connection failure. PortX sends bidirectional TCP-level keepalives every 30 seconds and probes application heartbeats. If a packet is lost, it detects failure within 90 seconds and automatically reconnects with zero manual intervention.
 
 #### Q: Does my computer need to stay on?
-Yes. The service you are exposing runs locally on your machine. If your machine sleeps or shuts down, the tunnel pauses. However, with `sudo portx watchdog install`, PortX immediately brings all your tunnels back online as soon as your machine wakes up or boots.
+Yes. The service you are exposing runs locally on your machine. If your machine sleeps or shuts down, the tunnel pauses. However, with `sudo portx watchdog install`, PortX restores auto-start tunnels after login/boot and reconnects after waking.
 
 #### Q: Can I run multiple tunnels simultaneously?
 Yes. You can run dozens of HTTP, TCP, and UDP tunnels concurrently. Each tunnel runs in its own isolated process with dedicated kernel-level file locks.

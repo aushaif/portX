@@ -67,9 +67,6 @@ _HEARTBEAT_INTERVAL = 60     # seconds between heartbeats
 # frpc log markers that signal a fatal configuration problem
 _FATAL_MARKERS = (
     "authentication failed",
-    "no such host",
-    "login to server failed",
-    "failed to login",
 )
 
 # frpc log markers that signal an allocation conflict (reregister needed)
@@ -132,9 +129,11 @@ def _kill_frpc() -> None:
     if _proc is not None:
         try:
             _proc.terminate()
-            time.sleep(0.4)
-            if _proc.poll() is None:
+            try:
+                _proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
                 _proc.kill()
+                _proc.wait()
         except OSError:
             pass
 
@@ -147,8 +146,6 @@ _LIVE_FAILURE_MARKERS = (
     "connection is closed",
     "i/o timeout",
     "connection refused",
-    "login to server failed",
-    "failed to login",
     "read tcp",           # covers "read tcp ... EOF" and similar
     "write tcp",          # covers "write tcp ... broken pipe"
     "proxy is not working",
@@ -189,10 +186,14 @@ def _heartbeat_loop(tunnel_id: str, stop_event: threading.Event) -> None:
     """Send periodic heartbeats to keep the server allocation alive."""
     while not stop_event.wait(timeout=_HEARTBEAT_INTERVAL):
         try:
+            current = _state.get_tunnel(_tunnel_name) or {}
+            tunnel_id = current.get("tunnel_id", tunnel_id)
             alive = _api.heartbeat(tunnel_id)
             if not alive:
                 # Server no longer knows this tunnel_id — flag for reregister
-                _log("Heartbeat returned 404 — server may need reregister on next reconnect")
+                _log("Heartbeat returned 404 — reclaiming allocation")
+                if _try_reregister_or_new():
+                    _reload()
         except Exception as exc:
             _log(f"Heartbeat error (non-fatal): {exc}")
 
@@ -235,6 +236,7 @@ def _regenerate_config(info: dict) -> None:
         )
 
     config_path.write_text(toml, "utf-8")
+    config_path.chmod(0o600)
 
     # Persist any allocation changes to state
     updates: dict = {"proxy_name": proxy_name}
@@ -292,14 +294,16 @@ def _try_reregister_or_new() -> bool:
             return True
         except _api.APIError as exc:
             _log(f"Reregister failed: {exc}")
-            if "conflict" in str(exc).lower():
+            if "(409)" in str(exc) or "conflict" in str(exc).lower():
                 _log("Our subdomain/port was taken — requesting a new tunnel...")
+            else:
+                return False  # Network/server errors must not replace an allocation.
             # Fall through to step 2
 
     # Step 2: request a completely new tunnel (last resort — URL will change)
     try:
         _log("Requesting a new tunnel allocation (URL may change)...")
-        info = _api.request_tunnel(t, local_host, local_port, subdomain)
+        info = _api.request_tunnel(t, local_host, local_port)
         _log(f"New tunnel allocated: {info.get('public_url')}")
         _regenerate_config(info)
         return True
@@ -351,6 +355,7 @@ def main() -> None:
     tunnel = _state.get_tunnel(_tunnel_name)
     if not tunnel:
         sys.exit(1)
+    _state.update_tunnel(_tunnel_name, pid=os.getpid(), status="starting")
 
     frp_config_path = Path(tunnel["frp_config_path"])
     log_path        = Path(tunnel["log_path"])
@@ -361,6 +366,11 @@ def main() -> None:
     sys.stderr = _log_fd
 
     _log(f"Worker started for tunnel '{_tunnel_name}' (PID={os.getpid()})")
+
+    # Reclaim server metadata immediately after a restart or server state loss.
+    if tunnel.get("tunnel_id"):
+        _try_reregister_or_new()
+        tunnel = _state.get_tunnel(_tunnel_name) or tunnel
 
     # Ensure config file exists and is synchronized with current frps_host, port, and token
     if not frp_config_path.exists():

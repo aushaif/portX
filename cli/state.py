@@ -15,6 +15,7 @@ import contextlib
 import fcntl
 import os
 import time
+import re
 from pathlib import Path
 
 # ── Paths ─────────────────────────────────────────────────────────────────
@@ -29,8 +30,7 @@ for d in (PORTX_DIR, CONFIGS_DIR, LOGS_DIR, LOCKS_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
 # Ensure tunnels.toml exists
-if not TUNNELS_TOML.exists():
-    TUNNELS_TOML.write_text("", "utf-8")
+TUNNELS_TOML.touch(exist_ok=True)
 
 
 # ── File Locking ─────────────────────────────────────────────────────────
@@ -166,7 +166,7 @@ def get_tunnel(name: str) -> dict | None:
             t["status"] = "stopped"
             with _lock():
                 current = _read_tunnels_raw()
-                if name in current:
+                if name in current and current[name].get("pid") == pid and not is_pid_alive(int(pid or 0)):
                     current[name]["status"] = "stopped"
                     current[name]["pid"] = 0
                     _write_tunnels_raw(current)
@@ -206,6 +206,8 @@ def list_tunnels() -> dict[str, dict]:
 
 def update_tunnel(name: str, **kwargs) -> None:
     """Create or update a tunnel record atomically."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name):
+        raise ValueError("Invalid tunnel name")
     with _lock():
         tunnels = _read_tunnels_raw()
         if name not in tunnels:

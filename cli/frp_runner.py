@@ -8,7 +8,9 @@ successful connection, and provides a clean shutdown.
 from __future__ import annotations
 
 import subprocess
-import threading
+import selectors
+import os
+import time
 from pathlib import Path
 
 
@@ -17,11 +19,6 @@ class FRPError(Exception):
 
 
 # ── Log-line classifiers ──────────────────────────────────────────────────
-_SUCCESS_MARKERS = (
-    "start proxy success",
-    "login to server success",
-)
-
 _FAILURE_MARKERS = (
     "login to server failed",
     "proxy name conflict",
@@ -60,71 +57,46 @@ def start_frpc(
 
     proc = subprocess.Popen(
         [str(frp_binary), "-c", str(config_path)],
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
     )
 
-    # Shared state between the watcher thread and this thread
-    _ready    = threading.Event()
-    _failed   = threading.Event()
-    _stop     = threading.Event()   # signals watcher to exit after startup
-    _fail_msg: list[str] = []
-    _all_lines: list[str] = []
-
-    def _watch() -> None:
-        """Read frpc output lines and signal success / failure events.
-        Exits as soon as _stop is set so the caller's drainer can take over.
-        """
-        for raw_line in proc.stdout:  # type: ignore[union-attr]
-            if _stop.is_set():
-                break
-            line = raw_line.rstrip()
-            _all_lines.append(line)
-            lower = line.lower()
-
-            if any(m in lower for m in _SUCCESS_MARKERS):
-                _ready.set()
-
-            if any(m in lower for m in _FAILURE_MARKERS):
-                _fail_msg.append(line)
-                _failed.set()
-                _ready.set()   # unblock the wait below
-
-        # stdout EOF — process has ended
-        _ready.set()
-
-    watcher = threading.Thread(target=_watch, daemon=True)
-    watcher.start()
-
-    _ready.wait(timeout=timeout)
-
-    # Signal the watcher to stop consuming stdout so the worker's drainer
-    # thread can take over and watch for live connection-loss markers.
-    _stop.set()
-
-    # ── Process already exited ─────────────────────────────────────────────
-    if proc.poll() is not None:
-        watcher.join(timeout=2)
-        tail = "\n    ".join(_all_lines[-8:]) or "frpc produced no output."
-        raise FRPError(
-            "frpc exited unexpectedly during startup.\n"
-            f"    {tail}"
-        )
-
-    # ── Explicit failure marker detected ──────────────────────────────────
-    if _failed.is_set():
-        watcher.join(timeout=2)
+    # One reader owns stdout during startup. Hand it to the worker only after
+    # the proxy (not merely the control connection) has been accepted.
+    lines = []
+    pending = b""
+    deadline = time.monotonic() + timeout
+    selector = selectors.DefaultSelector()
+    selector.register(proc.stdout, selectors.EVENT_READ)
+    try:
+        while time.monotonic() < deadline:
+            for key, _ in selector.select(max(0, deadline - time.monotonic())):
+                chunk = os.read(key.fileobj.fileno(), 65536)
+                if not chunk:
+                    raise FRPError("frpc exited during startup: " + "\n".join(lines[-8:]))
+                pending += chunk
+                while b"\n" in pending:
+                    raw, pending = pending.split(b"\n", 1)
+                    line = raw.decode("utf-8", errors="replace").rstrip()
+                    lines.append(line)
+                    lower = line.lower()
+                    if any(m in lower for m in _FAILURE_MARKERS) or "start error" in lower:
+                        raise FRPError("Tunnel connection failed: " + line)
+                    if "start proxy success" in lower:
+                        if proc.poll() is not None:
+                            raise FRPError("frpc exited immediately after proxy startup")
+                        return proc
+        raise FRPError("Timed out waiting for proxy startup: " + "\n".join(lines[-8:]))
+    except BaseException:
         stop_frpc(proc)
-        msg = _fail_msg[0] if _fail_msg else "frpc reported a connection error."
-        raise FRPError(f"Tunnel connection failed: {msg}")
-
-    # ── Timeout reached but process is still running → assume success ──────
-    # (frpc on newer versions may not print a per-proxy "success" line)
-    # Watcher exits shortly (checks _stop); caller's drainer thread takes over.
-    watcher.join(timeout=2)
-    return proc
+        if proc.stdout:
+            proc.stdout.close()
+        raise
+    finally:
+        selector.close()
 
 
 def stop_frpc(proc: subprocess.Popen) -> None:

@@ -15,12 +15,12 @@
     "frps_udp_port": 7001,
     "api_host": "0.0.0.0",
     "api_port": 8765,
-    "api_url": "http://server.infinitynoob.space:8765"
+    "api_url": "https://server.infinitynoob.space"
   },
   "domains": {
     "http": "infinitynoob.space",
-    "tcp": "infinitynoob.space",
-    "udp": "infinitynoob.space"
+    "tcp": "server.infinitynoob.space",
+    "udp": "server.infinitynoob.space"
   },
   "ports": {
     "tcp_pool_min": 30000,

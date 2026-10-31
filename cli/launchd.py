@@ -1,7 +1,8 @@
 """
 PortX system service installer.
 
-Installs/removes the PortX watchdog as a true system-level boot daemon:
+Without sudo on macOS, installs a user LaunchAgent that starts at login.
+With sudo, installs/removes a system-level boot daemon:
   - macOS : /Library/LaunchDaemons/<label>.plist  (runs at boot, before login)
   - Linux : /etc/systemd/system/portx-watchdog.service
 
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import os
 import platform
+import plistlib
 import pwd
 import subprocess
 import sys
@@ -21,6 +23,8 @@ from pathlib import Path
 # ── Constants ─────────────────────────────────────────────────────────────
 _LAUNCHD_LABEL   = "lol.infinitynoob.portx.watchdog"
 _LAUNCHD_PLIST   = Path("/Library/LaunchDaemons") / f"{_LAUNCHD_LABEL}.plist"
+_USER_LABEL = "space.infinitynoob.portx.watchdog"
+_USER_PLIST = Path.home() / "Library/LaunchAgents" / f"{_USER_LABEL}.plist"
 _SYSTEMD_SERVICE = Path("/etc/systemd/system/portx-watchdog.service")
 
 
@@ -61,6 +65,8 @@ def install() -> str:
     Install the watchdog as a system boot daemon.
     Raises RuntimeError on failure (e.g., no sudo).
     """
+    if platform.system() == "Darwin" and os.geteuid() != 0:
+        return _install_user_macos()
     if os.geteuid() != 0:
         raise RuntimeError("Installing the boot daemon requires root privileges. Please run with sudo.")
 
@@ -81,6 +87,8 @@ def uninstall() -> str:
     Remove the watchdog boot daemon.
     Raises RuntimeError on failure (e.g., no sudo).
     """
+    if platform.system() == "Darwin" and os.geteuid() != 0:
+        return _uninstall_user_macos()
     if os.geteuid() != 0:
         raise RuntimeError("Removing the boot daemon requires root privileges. Please run with sudo.")
 
@@ -96,7 +104,7 @@ def uninstall() -> str:
 def is_installed() -> bool:
     system = platform.system()
     if system == "Darwin":
-        return _LAUNCHD_PLIST.exists()
+        return _USER_PLIST.exists() or _LAUNCHD_PLIST.exists()
     elif system == "Linux":
         return _SYSTEMD_SERVICE.exists()
     return False
@@ -106,12 +114,12 @@ def is_running() -> bool:
     system = platform.system()
     if system == "Darwin":
         try:
-            # Check system domain since it's a LaunchDaemon
+            target = f"gui/{os.getuid()}/{_USER_LABEL}" if _USER_PLIST.exists() else f"system/{_LAUNCHD_LABEL}"
             r = subprocess.run(
-                ["sudo", "launchctl", "list", _LAUNCHD_LABEL],
+                ["launchctl", "print", target],
                 capture_output=True, text=True,
             )
-            return r.returncode == 0
+            return r.returncode == 0 and "state = running" in r.stdout
         except Exception:
             return False
     elif system == "Linux":
@@ -267,3 +275,38 @@ def _uninstall_linux() -> str:
             pass
         return f"Linux systemd daemon removed: {_SYSTEMD_SERVICE}"
     return "Linux systemd daemon was not installed."
+
+
+def _install_user_macos() -> str:
+    """Run outside Terminal's process tree, without requiring a root daemon."""
+    if _LAUNCHD_PLIST.exists():
+        raise RuntimeError("A system watchdog already exists. Use sudo portx watchdog install to update it.")
+    home = str(Path.home())
+    log_dir = Path(home) / ".portx/logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    _USER_PLIST.parent.mkdir(parents=True, exist_ok=True)
+    job = {
+        "Label": _USER_LABEL,
+        "ProgramArguments": [_python_exe(), _watchdog_script(home)],
+        "EnvironmentVariables": {"HOME": home, "USER": pwd.getpwuid(os.getuid()).pw_name},
+        "RunAtLoad": True, "KeepAlive": True, "ThrottleInterval": 10,
+        "StandardOutPath": str(log_dir / "watchdog.log"),
+        "StandardErrorPath": str(log_dir / "watchdog.log"),
+    }
+    _USER_PLIST.write_bytes(plistlib.dumps(job))
+    domain = f"gui/{os.getuid()}"
+    subprocess.run(["launchctl", "bootout", f"{domain}/{_USER_LABEL}"], capture_output=True)
+    result = subprocess.run(["launchctl", "bootstrap", domain, str(_USER_PLIST)], capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError(f"launchctl bootstrap failed: {result.stderr.strip()}")
+    return f"macOS LaunchAgent installed (starts at login): {_USER_PLIST}"
+
+
+def _uninstall_user_macos() -> str:
+    if not _USER_PLIST.exists():
+        if _LAUNCHD_PLIST.exists():
+            raise RuntimeError("System watchdog removal requires sudo portx watchdog uninstall")
+        return "No user watchdog installed."
+    subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{_USER_LABEL}"], capture_output=True)
+    _USER_PLIST.unlink()
+    return "macOS user watchdog removed."

@@ -11,6 +11,8 @@ Uses FRP v0.52+ TOML format.
 from __future__ import annotations
 
 from pathlib import Path
+import json
+import tempfile
 import config as _cfg
 
 
@@ -33,10 +35,10 @@ def _base(frps_host: str | None = None, frps_port: int | None = None) -> str:
     port = frps_port or _cfg.get_frps_port()
     auth_token = _cfg.get_auth_token()
     return (
-        f'serverAddr = "{host}"\n'
+        f"serverAddr = {json.dumps(host)}\n"
         f"serverPort = {port}\n"
         'auth.method = "token"\n'
-        f'auth.token = "{auth_token}"\n'
+        f"auth.token = {json.dumps(auth_token)}\n"
         "\n"
         "[transport]\n"
         "heartbeatInterval = 30\n"          # probe server every 30 s
@@ -44,7 +46,7 @@ def _base(frps_host: str | None = None, frps_port: int | None = None) -> str:
         "tcpMuxKeepaliveInterval = 30\n"    # TCP-level keepalive every 30 s
         "\n"
         "[log]\n"
-        'level = "warn"\n'
+        'level = "info"\n'
         "\n"
     )
 
@@ -68,11 +70,11 @@ def generate_http_config(
     return (
         _base(host, port)
         + "[[proxies]]\n"
-        + f'name      = "{proxy_name}"\n'
+        + f"name      = {json.dumps(proxy_name)}\n"
         + 'type      = "http"\n'
-        + f'localIP   = "{local_host}"\n'
+        + f"localIP   = {json.dumps(local_host)}\n"
         + f"localPort = {local_port}\n"
-        + f'subdomain = "{subdomain}"\n'
+        + f"subdomain = {json.dumps(subdomain)}\n"
     )
 
 
@@ -113,9 +115,9 @@ def generate_tcp_config(
     toml = (
         _base(host, port)
         + "[[proxies]]\n"
-        + f'name       = "{proxy_name}"\n'
+        + f"name       = {json.dumps(proxy_name)}\n"
         + 'type       = "tcp"\n'
-        + f'localIP    = "{local_host}"\n'
+        + f"localIP    = {json.dumps(local_host)}\n"
         + f"localPort  = {local_port}\n"
         + f"remotePort = {remote_port}\n"
     )
@@ -147,9 +149,9 @@ def generate_udp_config(
     toml = (
         _base(host, port)
         + "[[proxies]]\n"
-        + f'name       = "{proxy_name}"\n'
+        + f"name       = {json.dumps(proxy_name)}\n"
         + 'type       = "udp"\n'
-        + f'localIP    = "{local_host}"\n'
+        + f"localIP    = {json.dumps(local_host)}\n"
         + f"localPort  = {local_port}\n"
         + f"remotePort = {remote_port}\n"
     )
@@ -198,7 +200,7 @@ def generate_config_for_tunnel(
             frps_port=port,
             proxy_protocol=proxy_protocol,
         )
-    else:  # udp
+    elif t_type == "udp":
         remote_port = int(tunnel_data.get("remote_port", 0))
         return generate_udp_config(
             local_host=local_host,
@@ -209,6 +211,8 @@ def generate_config_for_tunnel(
             frps_port=port,
             proxy_protocol=proxy_protocol,
         )
+
+    raise ValueError(f"Unknown tunnel type: {t_type}")
 
 
 def sync_tunnel_config_file(
@@ -223,30 +227,16 @@ def sync_tunnel_config_file(
     Returns True if the file was created or rewritten, False if already up-to-date.
     """
     p = Path(config_path)
-    expected_host  = _cfg.get_frps_host()
-    expected_port  = _cfg.get_frps_port()
-    expected_token = _cfg.get_auth_token()
-    expected_pp    = normalize_proxy_protocol(tunnel_data.get("proxy_protocol"))
-
-    if not force and p.is_file():
-        try:
-            content = p.read_text("utf-8")
-            has_host  = f'serverAddr = "{expected_host}"' in content
-            has_port  = f'serverPort = {expected_port}' in content
-            has_token = f'auth.token = "{expected_token}"' in content
-            # Also check proxy_protocol consistency
-            if expected_pp:
-                has_pp = f'transport.proxyProtocolVersion = "{expected_pp}"' in content
-            else:
-                has_pp = 'transport.proxyProtocolVersion' not in content
-            if has_host and has_port and has_token and has_pp:
-                return False
-        except Exception:
-            pass
-
-    toml = generate_config_for_tunnel(
-        tunnel_name, tunnel_data, frps_host=expected_host, frps_port=expected_port
-    )
+    toml = generate_config_for_tunnel(tunnel_name, tunnel_data)
+    if not force and p.is_file() and p.read_text("utf-8") == toml:
+        return False
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(toml, "utf-8")
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=p.parent,
+                                     prefix=p.name + ".", delete=False) as fd:
+        tmp = Path(fd.name)
+        fd.write(toml)
+    try:
+        tmp.replace(p)
+    finally:
+        tmp.unlink(missing_ok=True)
     return True

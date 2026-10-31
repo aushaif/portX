@@ -14,7 +14,7 @@
 set -euo pipefail
 
 PORTX_DIR="/opt/portx"
-FRP_VERSION=""   # leave empty to auto-detect latest
+FRP_VERSION="${FRP_VERSION:-}"   # leave empty to auto-detect latest
 
 echo ""
 echo "  PortX VPS Setup v2.1"
@@ -76,7 +76,25 @@ info "Installing PortX server..."
 mkdir -p "$PORTX_DIR"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cp "$SCRIPT_DIR/portx_server.py" "$PORTX_DIR/"
-cp "$SCRIPT_DIR/frps.toml"       "$PORTX_DIR/"
+# Preserve the deployed relay token and settings on upgrade.
+if [ ! -f "$PORTX_DIR/frps.toml" ]; then
+  cp "$SCRIPT_DIR/frps.toml" "$PORTX_DIR/"
+fi
+cp "$SCRIPT_DIR/Caddyfile" "$SCRIPT_DIR/configure-origin.sh" "$PORTX_DIR/"
+python3 - "$PORTX_DIR/frps.toml" <<'PYTOKEN'
+import json, os, re, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+s = p.read_text()
+m = re.search(r'^auth\.token\s*=\s*("(?:[^"\\]|\\.)*")', s, re.M)
+old = json.loads(m.group(1)) if m else ""
+token = os.environ.get("PORTX_AUTH_TOKEN") or old
+if not token:
+    raise SystemExit("Set PORTX_AUTH_TOKEN to the same token used by your clients.")
+s = re.sub(r'^auth\.token\s*=.*$', 'auth.token = ' + json.dumps(token), s, flags=re.M)
+p.write_text(s)
+p.chmod(0o600)
+PYTOKEN
 
 # Copy central config file if present (one directory up = project root)
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -155,6 +173,10 @@ WantedBy=multi-user.target
 EOF
 ok "portx-api service created"
 
+# Configure TLS termination and automatic certificate management.
+systemctl daemon-reload
+bash "$PORTX_DIR/configure-origin.sh"
+
 # ── Enable & start services ───────────────────────────────────────────────
 info "Starting services..."
 systemctl daemon-reload
@@ -178,11 +200,11 @@ if command -v ufw &>/dev/null; then
   info "Opening firewall ports (ufw)..."
   ufw allow 7000/tcp   comment "frps bind port (TCP control)"  2>/dev/null || true
   ufw allow 7001/udp   comment "frps UDP bind port (UDP tunnels)" 2>/dev/null || true
-  ufw allow 80/tcp     comment "frps HTTP vhost"        2>/dev/null || true
-  ufw allow 443/tcp    comment "frps HTTPS vhost"       2>/dev/null || true
+  ufw allow 80/tcp     comment "Caddy HTTP redirect"        2>/dev/null || true
+  ufw allow 443/tcp    comment "Caddy HTTPS origin"       2>/dev/null || true
   ufw allow 8765/tcp   comment "PortX API"              2>/dev/null || true
-  ufw allow 1:65000/tcp comment "PortX TCP tunnels" 2>/dev/null || true
-  ufw allow 1:65000/udp comment "PortX UDP tunnels" 2>/dev/null || true
+  ufw allow 30000:31999/tcp comment "PortX TCP tunnel pool" 2>/dev/null || true
+  ufw allow 32000:33999/udp comment "PortX UDP tunnel pool" 2>/dev/null || true
   ok "Firewall rules applied"
 fi
 

@@ -60,6 +60,8 @@ Environment variables (all optional):
 from __future__ import annotations
 
 import json
+import hmac
+from urllib.parse import urlsplit, parse_qs
 import logging
 import os
 import random
@@ -120,9 +122,9 @@ FRPS_PORT = int(os.environ.get("PORTX_FRPS_PORT",
 HTTP_DOMAIN = os.environ.get("PORTX_HTTP_DOMAIN",
     str(_pcfg("domains", "http", "infinitynoob.space")))
 TCP_DOMAIN  = os.environ.get("PORTX_TCP_DOMAIN",
-    str(_pcfg("domains", "tcp", "infinitynoob.space")))
+    str(_pcfg("domains", "tcp", "server.infinitynoob.space")))
 UDP_DOMAIN  = os.environ.get("PORTX_UDP_DOMAIN",
-    str(_pcfg("domains", "udp", "infinitynoob.space")))
+    str(_pcfg("domains", "udp", "server.infinitynoob.space")))
 
 TCP_PORT_MIN = int(os.environ.get("PORTX_TCP_PORT_MIN",
     str(_pcfg("ports", "tcp_pool_min", 30000))))
@@ -137,7 +139,7 @@ CUSTOM_PORT_MIN = int(os.environ.get("PORTX_CUSTOM_PORT_MIN",
     str(_pcfg("ports", "custom_min", 1))))
 CUSTOM_PORT_MAX = int(os.environ.get("PORTX_CUSTOM_PORT_MAX",
     str(_pcfg("ports", "custom_max", 65000))))
-REACHABLE_PORTS = {22, 80, 443, FRPS_PORT, API_PORT}
+REACHABLE_PORTS = {22, 80, 443, 8080, FRPS_PORT, API_PORT}
 RESERVED_TCP_PORTS = REACHABLE_PORTS
 
 # Tunnels that haven't sent a heartbeat for this many seconds are considered
@@ -162,6 +164,44 @@ def _get_state_file() -> Path:
     return Path(__file__).resolve().parent / "state.json"
 
 STATE_FILE = _get_state_file()
+
+def _auth_token() -> str:
+    if os.environ.get("PORTX_AUTH_TOKEN"):
+        return os.environ["PORTX_AUTH_TOKEN"]
+    path = Path(__file__).resolve().parent / "frps.toml"
+    if path.exists():
+        match = re.search(r'^auth\.token\s*=\s*("(?:[^"\\]|\\.)*")', path.read_text(), re.M)
+        if match:
+            return json.loads(match.group(1))
+    return ""
+
+
+AUTH_TOKEN = _auth_token()
+
+
+def _validate_request(req: dict, reclaim: bool = False) -> None:
+    t = req.get("type")
+    if t not in ("http", "tcp", "udp"):
+        raise ValueError("Invalid tunnel type")
+    port = req.get("local_port")
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise ValueError("Invalid local_port")
+    host = req.get("local_host", "127.0.0.1")
+    if not isinstance(host, str) or not host or any(c in host for c in '\n\r"'):
+        raise ValueError("Invalid local_host")
+    sub = req.get("subdomain")
+    if t == "http" and (sub is not None or reclaim):
+        if not isinstance(sub, str) or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", sub):
+            raise ValueError("Invalid subdomain: use a single lowercase DNS label")
+        if sub in {"server", "www", "mail", "api", "portx"}:
+            raise ValueError("Subdomain is reserved for system services")
+    remote = req.get("remote_port")
+    if t in ("tcp", "udp") and (remote is not None or reclaim):
+        if type(remote) is not int or not CUSTOM_PORT_MIN <= remote <= CUSTOM_PORT_MAX:
+            raise ValueError("Invalid remote_port")
+        if t == "tcp" and remote in RESERVED_TCP_PORTS:
+            raise ValueError("TCP port is reserved for system services")
+
 
 SUBDOMAIN_LEN   = 6
 SUBDOMAIN_CHARS = string.ascii_lowercase + string.digits
@@ -240,6 +280,7 @@ class TunnelAllocator:
         loaded = 0
         for tid, info in tunnels.items():
             t = info.get("type", "")
+            info["last_seen"] = time.time()  # Give reconnecting clients a full grace period.
             self._tunnels[tid] = info
             if t == "http":
                 self._used_subdomains.add(info.get("subdomain", ""))
@@ -544,16 +585,22 @@ class TunnelAllocator:
         Release all tunnels whose last_seen is older than `max_age` seconds.
         Returns a list of released tunnel_ids for logging.
         """
-        now = time.time()
-        stale_ids = [
-            tid for tid, info in self._tunnels.items()
-            if now - info.get("last_seen", now) > max_age
-        ]
-        released = []
-        for tid in stale_ids:
-            if self.release(tid):
-                released.append(tid)
-        return released
+        # Hold the lock through selection and deletion so heartbeats cannot
+        # race with the reaper. release() also takes the lock, so delete here.
+        with self._lock:
+            now = time.time()
+            stale = [tid for tid, info in self._tunnels.items()
+                     if now - info.get("last_seen", now) > max_age]
+            for tid in stale:
+                info = self._tunnels.pop(tid)
+                if info["type"] == "http":
+                    self._used_subdomains.discard(info.get("subdomain", ""))
+                else:
+                    used = self._used_tcp_ports if info["type"] == "tcp" else self._used_udp_ports
+                    used.discard(info.get("remote_port"))
+            if stale:
+                self._save_state()
+            return stale
 
     # ── Info ──────────────────────────────────────────────────────────────
 
@@ -563,6 +610,12 @@ class TunnelAllocator:
             if info is None:
                 return None
             return self._build_response(tunnel_id, info)
+
+    def permits_hostname(self, hostname: str) -> bool:
+        with self._lock:
+            return any(info.get("type") == "http" and
+                       hostname == f"{info.get('subdomain')}.{HTTP_DOMAIN}"
+                       for info in self._tunnels.values())
 
     # ── Internals ─────────────────────────────────────────────────────────
 
@@ -637,17 +690,27 @@ class PortXHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def _read_json_body(self) -> dict | None:
-        length = int(self.headers.get("Content-Length", 0))
-        if length == 0:
-            return {}
         try:
-            return json.loads(self.rfile.read(length).decode())
-        except Exception:
+            length = int(self.headers.get("Content-Length", 0))
+            if not 0 <= length <= 65536:
+                return None
+            result = json.loads(self.rfile.read(length).decode()) if length else {}
+            return result if isinstance(result, dict) else None
+        except (ValueError, OSError):
             return None
+
+    def _authorized(self) -> bool:
+        expected = f"Bearer {AUTH_TOKEN}"
+        if AUTH_TOKEN and hmac.compare_digest(self.headers.get("Authorization", ""), expected):
+            return True
+        self._send_json(401, {"error": "A valid PortX token is required"})
+        return False
 
     # ── POST /api/v1/tunnel ───────────────────────────────────────────────
 
     def do_POST(self) -> None:
+        if not self._authorized():
+            return
         # New tunnel
         if self.path == "/api/v1/tunnel":
             self._handle_new_tunnel()
@@ -667,7 +730,13 @@ class PortXHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "Invalid JSON body"})
             return
 
-        tunnel_type = body.get("type", "").lower()
+        try:
+            _validate_request(body)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+
+        tunnel_type = body.get("type", "")
         local_host  = body.get("local_host", "127.0.0.1")
         local_port  = body.get("local_port")
         req_sub     = body.get("subdomain")
@@ -714,6 +783,12 @@ class PortXHandler(BaseHTTPRequestHandler):
             return
 
         try:
+            _validate_request(body, reclaim=True)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+
+        try:
             info = _allocator.reregister(tunnel_id, body)
         except RuntimeError as exc:
             err = str(exc)
@@ -731,6 +806,8 @@ class PortXHandler(BaseHTTPRequestHandler):
     # ── DELETE /api/v1/tunnel/<id> ────────────────────────────────────────
 
     def do_DELETE(self) -> None:
+        if not self._authorized():
+            return
         m = re.fullmatch(r"/api/v1/tunnel/([0-9a-f-]+)", self.path)
         if not m:
             self._send_json(404, {"error": "Not found"})
@@ -749,6 +826,14 @@ class PortXHandler(BaseHTTPRequestHandler):
     # ── GET (health, tunnel info) ─────────────────────────────────────────
 
     def do_GET(self) -> None:
+        parsed = urlsplit(self.path)
+        if parsed.path == "/api/v1/tls/allow":
+            # Caddy's on-demand certificate authorization. Only allocated
+            # HTTP hostnames are eligible; arbitrary SNI is denied.
+            hostname = parse_qs(parsed.query).get("domain", [""])[0]
+            allowed = _allocator.permits_hostname(hostname)
+            self._send_empty(200 if allowed else 403)
+            return
         if self.path in ("/health", "/api/v1/health", "/"):
             self._send_json(200, {
                 "status": "ok",
@@ -757,6 +842,8 @@ class PortXHandler(BaseHTTPRequestHandler):
             })
             return
 
+        if not self._authorized():
+            return
         m = re.fullmatch(r"/api/v1/tunnel/([0-9a-f-]+)", self.path)
         if m:
             info = _allocator.get_info(m.group(1))
@@ -771,6 +858,8 @@ class PortXHandler(BaseHTTPRequestHandler):
     # ── PUT /api/v1/tunnel/<id>/heartbeat ─────────────────────────────────
 
     def do_PUT(self) -> None:
+        if not self._authorized():
+            return
         m = re.fullmatch(r"/api/v1/tunnel/([0-9a-f-]+)/heartbeat", self.path)
         if not m:
             self._send_json(404, {"error": "Not found"})
@@ -816,6 +905,8 @@ def _stale_reaper_loop() -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    if not AUTH_TOKEN:
+        raise RuntimeError("Set PORTX_AUTH_TOKEN or auth.token in frps.toml before starting the API")
     log.info("PortX API server v2.1 starting...")
     log.info("  State file  : %s", STATE_FILE)
     log.info("  HTTP domain : *.%s", HTTP_DOMAIN)

@@ -1,0 +1,21 @@
+{
+    on_demand_tls {
+        ask http://127.0.0.1:8765/api/v1/tls/allow
+    }
+}
+
+# ACME HTTP challenges must reach this server on port 80.
+# Certificates are issued only for HTTP names allocated by the PortX API.
+https:// {
+    tls {
+        on_demand
+        issuer acme {
+            disable_tlsalpn_challenge
+        }
+    }
+    reverse_proxy 127.0.0.1:8080
+}
+
+server.infinitynoob.space {
+    reverse_proxy 127.0.0.1:8765
+}

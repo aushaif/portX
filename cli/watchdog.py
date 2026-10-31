@@ -71,7 +71,7 @@ def _spawn_worker(name: str) -> None:
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-        _state.update_tunnel(name, pid=proc.pid, status="starting")
+        # The worker publishes its PID after acquiring its exclusive lock.
         _log(f"Spawned worker for '{name}' (PID={proc.pid})")
     except Exception as exc:
         _log(f"Failed to spawn worker for '{name}': {exc}")
@@ -82,7 +82,7 @@ def _check_and_restore() -> None:
     tunnels = _state.load_tunnels()
     for name, t in tunnels.items():
         # Don't restart tunnels that were deliberately stopped by the user
-        if t.get("admin_stopped"):
+        if t.get("admin_stopped") or not t.get("auto_start", 1):
             continue
 
         status = t.get("status", "unknown")
@@ -106,6 +106,10 @@ def main() -> None:
     signal.signal(signal.SIGINT, _shutdown)
     # Ignore SIGHUP — keeps the watchdog alive when the controlling terminal closes
     signal.signal(signal.SIGHUP, signal.SIG_IGN)
+
+    watchdog_lock = _state.acquire_worker_lock("_watchdog")
+    if watchdog_lock is None:
+        return
 
     # Ensure log directory exists
     _state.LOGS_DIR.mkdir(parents=True, exist_ok=True)

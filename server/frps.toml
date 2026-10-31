@@ -1,16 +1,13 @@
-# frps.toml — PortX FRP Server Configuration
-# Deploy this on your VPS alongside portx_server.py
-# Uses FRP v0.52+ / v0.70+ TOML format.
-
 bindPort = 7000
 
-vhostHTTPPort = 80
-vhostHTTPSPort = 443
+vhostHTTPPort = 8080
+# TLS terminates at Caddy on :443 (see configure-origin.sh).
 
 subDomainHost = "infinitynoob.space"
 
 auth.method = "token"
 auth.token = ""
+
 
 allowPorts = [
     { start = 1, end = 65000 },

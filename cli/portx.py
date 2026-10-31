@@ -6,6 +6,7 @@ PortX CLI — v2.1 Background Tunnels
 from __future__ import annotations
 
 import argparse
+import re
 import random
 import string
 import sys
@@ -57,7 +58,7 @@ def _start_tunnel(
     name: str | None,
     subdomain: str | None = None,
     public_port: int | None = None,
-    auto_start: bool = False,
+    auto_start: bool = True,
     proxy_protocol: str | None = None,   # None | 'v1' | 'v2'
 ) -> None:
     _hdr()
@@ -69,8 +70,10 @@ def _start_tunnel(
         while name in tunnels:
             name = _generate_name()
 
-    if name in tunnels and tunnels[name].get("status") in ("starting", "running"):
-        _err(f"Tunnel '{name}' is already running. Stop it first.")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name):
+        _err("Tunnel names must use 1–64 letters, numbers, underscores or hyphens.")
+    if name in tunnels:
+        _err(f"Tunnel '{name}' already exists. Use portx restart or portx edit.")
 
     # 2. Port validation & conflict check (for custom TCP/UDP ports)
     if public_port is not None:
@@ -134,6 +137,7 @@ def _start_tunnel(
     # 5. Write config to persistent file
     config_path = _state.CONFIGS_DIR / f"{name}.toml"
     config_path.write_text(toml, "utf-8")
+    config_path.chmod(0o600)
 
     log_path = _state.LOGS_DIR / f"{name}.log"
 
@@ -157,7 +161,7 @@ def _start_tunnel(
         frps_host=frps_host,
         frps_port=frps_port,
         proxy_protocol=proxy_protocol or "",
-        auto_start=1,
+        auto_start=int(auto_start),
         admin_stopped=0,
     )
 
@@ -502,11 +506,17 @@ def main() -> None:
         help="For 'set': key and value to configure",
     )
 
+    for tunnel_parser in (p_http, p_https, p_tcp, p_udp):
+        tunnel_parser.add_argument("--auto-start", dest="auto_start", action="store_true", default=True,
+                                   help="Recover automatically after login/boot (default)")
+        tunnel_parser.add_argument("--no-auto-start", dest="auto_start", action="store_false",
+                                   help="Disable watchdog recovery for this tunnel")
+
     args = parser.parse_args()
 
     try:
         if args.command in ("http", "https"):
-            _start_tunnel("http", args.local_address, args.name, args.subdomain)
+            _start_tunnel("http", args.local_address, args.name, args.subdomain, auto_start=args.auto_start)
         elif args.command == "tcp":
             pp = getattr(args, "proxy_protocol", None)
             if not pp and getattr(args, "real_ip", False):
@@ -515,6 +525,7 @@ def main() -> None:
                 "tcp", args.local_address, args.name,
                 public_port=getattr(args, "public_port", None),
                 proxy_protocol=pp,
+                auto_start=args.auto_start,
             )
         elif args.command == "udp":
             pp = getattr(args, "proxy_protocol", None)
@@ -524,6 +535,7 @@ def main() -> None:
                 "udp", args.local_address, args.name,
                 public_port=getattr(args, "public_port", None),
                 proxy_protocol=pp,
+                auto_start=args.auto_start,
             )
         elif args.command in ("proxy-protocol", "real-ip", "ip-passthrough"):
             _cmds.cmd_proxy_protocol(

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -31,6 +32,8 @@ def _kill_process(pid: int) -> None:
     try:
         # Kill the entire process group to ensure child frpc dies too
         pgid = os.getpgid(pid)
+        if pgid != pid:
+            return  # Never signal an unrelated process group from stale state.
         os.killpg(pgid, signal.SIGTERM)
         time.sleep(0.5)
         if _state.is_pid_alive(pid):
@@ -56,6 +59,7 @@ def _stop_tunnel(name: str, tunnel: dict) -> None:
 
     Sets admin_stopped=1 to tell the watchdog not to auto-restart this tunnel.
     """
+    _state.update_tunnel(name, admin_stopped=1)
     _kill_worker(name, tunnel)
     _state.update_tunnel(name, status="stopped", pid=0, admin_stopped=1)
 
@@ -79,14 +83,21 @@ def _spawn_worker(name: str) -> None:
         close_fds=True,          # Don't inherit open file descriptors from CLI
     )
 
-    _state.update_tunnel(name, pid=proc.pid)
+    # The worker publishes its PID only after taking its exclusive lock.
 
     # Wait briefly for worker to either fail or succeed
-    time.sleep(1.0)
+    deadline = time.monotonic() + _cfg.FRPC_CONNECT_TIMEOUT + 3
+    while time.monotonic() < deadline:
+        t = _state.get_tunnel(name)
+        if t and t.get("status") in ("running", "failed", "reconnecting"):
+            break
+        if proc.poll() is not None:
+            break
+        time.sleep(0.1)
 
     t = _state.get_tunnel(name)
-    if t and t.get("status") == "failed":
-        print(f"\n  ✗ Tunnel failed to start: {t.get('error', 'Unknown error')}")
+    if not t or t.get("status") != "running":
+        print(f"\n  ✗ Tunnel failed to start: {(t or {}).get('error') or 'Worker did not confirm proxy startup; inspect portx info and logs'}")
         sys.exit(1)
 
 
@@ -270,8 +281,8 @@ def cmd_restart(name: str) -> None:
         sys.exit(1)
 
     # Kill any existing worker gracefully
-    if t.get("status") in ("starting", "running", "reconnecting"):
-        _kill_worker(name, t)
+    if _state.is_worker_locked(name) or t.get("status") in ("starting", "running", "reconnecting"):
+        _stop_tunnel(name, t)
 
     print(f"\n  → Restarting tunnel '{name}'...")
 
@@ -401,6 +412,13 @@ def cmd_edit(name: str) -> None:
         print("\n  ✓ No changes made.\n")
         return
 
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", new_name):
+        print("\n  ✗ Invalid tunnel name; existing tunnel was not modified.\n")
+        return
+    if new_name != name and _state.get_tunnel(new_name):
+        print(f"\n  ✗ Tunnel '{new_name}' already exists; existing tunnel was not modified.\n")
+        return
+
     # 4b. Validate local_port
     if not (1 <= new_local_port <= 65535):
         print(f"\n  ✗ Invalid local_port: {new_local_port} — must be between 1 and 65535.")
@@ -429,7 +447,7 @@ def cmd_edit(name: str) -> None:
                 return
 
         # If port or type or host/port changed, request/verify allocation with server
-        if new_remote_port != remote_port or new_type != tunnel_type or new_local_host != local_host or new_local_port != local_port:
+        if new_remote_port != remote_port or new_type != tunnel_type:
             print(f"  → Validating and allocating {new_type.upper()} port {new_remote_port} with server...")
             try:
                 info = _api.request_tunnel(new_type, new_local_host, new_local_port, remote_port=new_remote_port)
@@ -452,7 +470,7 @@ def cmd_edit(name: str) -> None:
             public_url  = f"{tcp_udp_domain}:{new_remote_port}"
 
     elif new_type == "http":
-        if new_subdomain != subdomain or new_type != tunnel_type or new_local_host != local_host or new_local_port != local_port:
+        if new_subdomain != subdomain or new_type != tunnel_type:
             print(f"  → Validating and allocating subdomain '{new_subdomain}' with server...")
             try:
                 info = _api.request_tunnel("http", new_local_host, new_local_port, subdomain=new_subdomain)
@@ -519,6 +537,7 @@ def cmd_edit(name: str) -> None:
         )
 
     new_config_path.write_text(toml, "utf-8")
+    new_config_path.chmod(0o600)
 
     # 8. Update state
     if new_name != name:
@@ -526,6 +545,8 @@ def cmd_edit(name: str) -> None:
 
     _state.update_tunnel(
         new_name,
+        auto_start=t.get("auto_start", 0),
+        creation_time=t.get("creation_time", time.time()),
         type=new_type,
         local_host=new_local_host,
         local_port=int(new_local_port),

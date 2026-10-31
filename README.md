@@ -34,6 +34,45 @@ brew install aushaif/portx/portx
 
 ---
 
+## Updating from this checkout
+
+To install local fixes without downloading the older GitHub copy:
+
+```bash
+python3 scripts/install-local.py --watchdog --api-url https://server.infinitynoob.space
+```
+
+This backs up the installed CLI and settings in `~/.portx/backups/`, updates the
+CLI and central defaults, and restarts active workers. On macOS, the watchdog
+runs as a user LaunchAgent, independently of Terminal, and starts at login.
+New tunnels enable watchdog recovery by default; `--auto-start` is explicit,
+and `--no-auto-start` opts out. `portx stop` prevents
+watchdog recovery until you explicitly start the tunnel again. The local
+machine and the service being exposed must remain awake and reachable.
+
+HTTP and HTTPS commands both expose a local **HTTP** service through public
+HTTPS. Caddy terminates TLS on the VPS and forwards HTTP to frps on port 8080.
+Certificates are automatically issued and renewed only for allocated HTTP
+subdomains. The first HTTPS request to a new name can take several seconds.
+Cloudflare Full (strict) works with these public certificates. Keep HTTP port 80
+and the ACME challenge path reachable for issuance and renewal.
+
+TCP/UDP use `server.infinitynoob.space`, which must be a **DNS-only** record.
+Cloudflare's ordinary HTTP proxy does not carry these raw tunnel connections.
+The API uses `https://server.infinitynoob.space` and requires the relay token.
+
+For a fresh VPS install, set `PORTX_AUTH_TOKEN` to the client token before
+running `server/setup.sh`. To add TLS to an existing `/opt/frp` deployment:
+
+```bash
+sudo env PORTX_DIR=/opt/frp FRPS_BINARY=/opt/frp/frps bash server/configure-origin.sh
+```
+
+Install the updated API and central config first; Caddy checks its
+`/api/v1/tls/allow` endpoint before issuing a certificate. Existing deployments
+should back up their configuration and state before upgrading. Custom TCP/UDP
+ports outside the configured pools also need individual firewall rules.
+
 ## First Run — Auth Token
 
 On first use, PortX will prompt you to enter your auth token:
@@ -43,7 +82,7 @@ On first use, PortX will prompt you to enter your auth token:
   ─────────────────────────────────────────
 
   No auth token found. Please enter your PortX auth token.
-  You can find your token at: https://portx.infinitynoob.lol/dashboard
+  You can find your token at: your server administrator (same token as frps auth.token)
 
   Auth token: ••••••••••••••••••••••
 
@@ -84,7 +123,7 @@ portx stop --all                                      # Stop all active tunnels
 portx start <name>                                    # Start a saved stopped tunnel
 portx start --all                                     # Start all saved stopped tunnels
 portx restart <name>                                  # Restart a running or stopped tunnel
-portx reload                                          # Gracefully reload all running tunnels (zero-downtime)
+portx reload                                          # Gracefully reload all running tunnels (brief reconnect)
 portx reload <name>                                   # Gracefully reload a specific tunnel
 portx edit <name>                                     # Interactively edit a tunnel's configuration
 portx remove <name>                                   # Permanently delete tunnel and release URL/port
@@ -115,7 +154,7 @@ All settings are stored in `~/.portx/config.toml`:
 
 ```toml
 [portx]
-api_url    = "http://server.infinitynoob.lol:8765"
+api_url    = "https://server.infinitynoob.space"
 auth_token = "your-token-here"
 ```
 
@@ -160,7 +199,7 @@ portx http 8080
     │       └─ Sends heartbeats to server every 60 s
     │       └─ Auto-reconnects on any failure
     │
-    └─ Tunnel live: https://<subdomain>.infinitynoob.lol → 127.0.0.1:8080
+    └─ Tunnel live: https://<subdomain>.infinitynoob.space → 127.0.0.1:8080
 
 portx stop my-app
     └─ Kill frpc → Notify server → Update state
